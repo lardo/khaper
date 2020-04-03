@@ -1,0 +1,37 @@
+#!/bin/bash
+#environment for the python script
+source /nfs2/pipe/genomics/toolkit/pymonitor/settings.sh
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/nfs/config/Python-2.6.5/lib
+export PYTHONPATH=/nfs2/pipe/genomics/toolkit/pymonitor/python
+export DRMAA_LIBRARY_PATH=/opt/gridengine/lib/linux-x64/libdrmaa.so
+export PYMONITOR_PY_PATH=/nfs2/pipe/genomics/toolkit/pymonitor/pymonitor.py
+export PYMONITOR_SH_PATH=/nfs2/pipe/genomics/toolkit/pymonitor/monitor
+
+export PYMONITOR_CONF_PATH=~/.pymonitor.conf
+# export PYMONITOR_LOG_PATH=~/.pymonitor.log
+export LOG_DIR="/lustre/project/og03/Public/Log/$USER"
+export PYMONITOR_LOG_PATH="$LOG_DIR/pymonitor.log"
+
+if [ ! -d "$LOG_DIR" ]; then
+  mkdir $LOG_DIR
+fi
+
+if [ ! -d "$PYMONITOR_LOG_PATH" ]; then
+  touch "$PYMONITOR_LOG_PATH"
+fi
+
+
+if [ "$1" = "cron" ]
+then
+  TASKLIST=`ps -o pid,args -u $USER`
+  CRONTASK=`echo "$TASKLIST" | awk '/pymonitor.py cron/ {print $1}'`
+  if [ -n "$CRONTASK" ]
+  then
+    kill -9 $CRONTASK
+  else
+    /usr/bin/python $PYMONITOR_PY_PATH "$@" 2>$PYMONITOR_LOG_PATH
+    #echo $USER >> /ifs5/PC_HUMAN_AP/USER/limiao/temp/monitor/log
+  fi
+else
+  /usr/bin/python $PYMONITOR_PY_PATH "$@"
+fi

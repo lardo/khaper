@@ -1,0 +1,7350 @@
+use strict;
+use warnings;
+
+die "perl $0 <filt.al> <out.al> <max_cov:30>\n" if(@ARGV==0);
+
+my($infile,$outfile,$max_cov) = @ARGV;
+$max_cov ||= 30;
+
+my %hash;
+my %hash_cov;
+
+open FI, $infile or die $!;
+open FO,">$outfile" or die $!;
+my $pre_pb = "";
+while (<FI>) {
+	my($pb, $contig, $pb_len, $contig_len) = split;
+	$hash_cov{$contig} += $pb_len;
+	# die "$pb, $contig, $pb_len, $contig_len\n";
+	next if ($hash_cov{$contig} > $contig_len*$max_cov);
+	$hash{$contig} .= "$pb ";
+}
+while (my ($ref,$pac) = each %hash){
+	print FO ">$ref\n";
+	my @pac_array = split(/\s+/,$pac);
+	foreach my $pac_content (@pac_array){
+		print FO "$pac_content\n";
+	}
+}
+
+close FI;
+close FO;
+use strict;
+use warnings;
+use FindBin qw($Bin);
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <filt.al> <out.al>\n" if(@ARGV==0);
+
+my($infile, $outfile) = @ARGV;
+
+my @array;
+my $pre_pb = "";
+
+# get the best scaff for each contig
+# ==============================================================================
+# |
+my %best_scf;
+open FI, $infile or die $!;
+while (<FI>) 
+{
+	my($pb, $contig, $pb_len, $contig_len,
+		$strand, $ovl, $pb_pos, $contig_pos, $score) = split;
+
+	my $value = $ovl*$score;
+	$best_scf{$contig} = "$pb $value" if(!exists $best_scf{$contig});
+
+	my($pre_pb, $pre_value) = split(/\s+/, $best_scf{$contig});
+	$best_scf{$contig} = "$pb $value" if($value>$pre_value);
+}
+close FI;
+# |
+# ==============================================================================
+
+
+my $total_n = 0;
+open FI, $infile or die $!;
+open FO, ">$outfile" or die $!;
+while (<FI>) 
+{
+	my($pb, $contig, $pb_len, $contig_len,
+		$strand, $ovl, $pb_pos, $contig_pos, $score) = split;
+
+    next if($pb_len==$ovl);
+    my($pre_pb2, $pre_value2) = split(/\s+/, $best_scf{$contig});
+    next if($pre_pb2 ne $pb);
+
+	outConnect() if($pb ne $pre_pb);
+	if($strand eq "-")
+	{
+		$pb_pos = $pb_len-$pb_pos;
+		$contig_pos = $contig_len-$contig_pos;
+	}
+
+	my $pb_cent = $pb_pos+($contig_len/2-$contig_pos);
+	push(@array, "$pb_cent $contig $contig_len $strand");
+	
+	$pre_pb = $pb;
+}
+outConnect();
+close FI;
+close FO;
+
+print "total_n $total_n\n";
+
+sub by_pos{
+	my $pos1 = (split(/\s+/,$a))[0];
+	my $pos2 = (split(/\s+/,$b))[0];
+	return $pos1<=>$pos2;
+}
+
+sub outConnect
+{
+	if(@array>1){
+		@array = sort by_pos @array;
+		for(my $i=0; $i<$#array; $i++)
+		{
+			my($pb_cent1, $contig1, $contig1_len, $strand1) = split(/\s+/, $array[$i]);
+			my($pb_cent2, $contig2, $contig2_len, $strand2) = split(/\s+/, $array[$i+1]);
+			# next if($contig1 eq $contig2);
+			my $dist = ($pb_cent2-$pb_cent1)-(0.5*$contig1_len+0.5*$contig2_len);
+			print FO "$pre_pb $contig1,$strand1,$contig1_len $contig2,$strand2,$contig2_len $dist\n";
+			$total_n += $dist;
+		}
+	}
+	@array = ();
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <filt.al> <out.al>\n" if(@ARGV==0);
+
+my($infile, $outfile) = @ARGV;
+
+my @array;
+my $pre_pb = "";
+
+open FI, $infile or die $!;
+open FO, ">$outfile" or die $!;
+while (<FI>) 
+{
+	my($pb, $contig, $pb_len, $contig_len,
+		$strand, $ovl, $pb_pos, $contig_pos, $score) = split;
+
+    next if($pb_len==$ovl);
+
+	outConnect() if($pb ne $pre_pb);
+	if($strand eq "-")
+	{
+		$pb_pos = $pb_len-$pb_pos;
+		$contig_pos = $contig_len-$contig_pos;
+	}
+
+	my $pb_cent = $pb_pos+($contig_len/2-$contig_pos);
+	push(@array, "$pb_cent $contig $contig_len $strand");
+	
+	$pre_pb = $pb;
+}
+outConnect();
+close FI;
+close FO;
+
+sub by_pos{
+	my $pos1 = (split(/\s+/,$a))[0];
+	my $pos2 = (split(/\s+/,$b))[0];
+	return $pos1<=>$pos2;
+}
+
+sub outConnect
+{
+	if(@array>1){
+		@array = sort by_pos @array;
+		for(my $i=0; $i<$#array; $i++)
+		{
+			my($pb_cent1, $contig1, $contig1_len, $strand1) = split(/\s+/, $array[$i]);
+			for(my $j=$i+1; $j<@array; $j++)
+			{
+				my($pb_cent2, $contig2, $contig2_len, $strand2) = split(/\s+/, $array[$j]);
+				if($contig1 eq $contig2) # meet the barcode
+				{	
+					$i=$j;
+					last;
+					next;
+				}
+				my $dist = ($pb_cent2-$pb_cent1)-(0.5*$contig1_len+0.5*$contig2_len);
+
+				print FO "$pre_pb $contig1,$strand1,$contig1_len $contig2,$strand2,$contig2_len $dist\n";
+			}
+		}
+	}
+	@array = ();
+}
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use Qsub;
+use SeqIO;
+
+=head1 Name
+
+    Align.pl  --The Alignment Tool
+
+=head1 Usage
+
+    perl Align.pl [arguments] <reference.fa> <query.fa>
+
+    Argument List:
+                  -g <FILE>       the unique kmer(.h5 or .bit)
+                  -k <INT>        the kmer size of the unique graph[17]
+                  -u <INT>        the min unique kmer[3]
+
+                  -s <INT>        split the reference file, in unit of M[100].
+                  -s2<INT>        split the query file, in unit of M[1000].
+
+                  -x <INT>        the scope to align[-1]
+                  -j <INT>        the jump length to get kmer[1]
+                  -n <INT>        max align number for query [20]
+
+                  -t <INT>        thread number[4]
+                  -m <INT>        align mode[1]
+                                  1. align with LCS,for uncrrected reads
+                                  2. align with kmer, for corrected reads
+
+                  -d <DIR>        the output directory [Align]
+
+
+                  -b <STR>        the pro_name [align]
+                  -q <STR>        the queue of sge [dna.q,rna.q,reseq.q]
+                  -p <STR>        the project of sge [og]
+
+
+=head1 Example
+
+perl Align -g k17.bit -k 17 -u 3 -n 10 ref.fa query.fa
+
+=cut
+
+my(
+$opt_g, $opt_k, $opt_u,   # kmer
+$opt_s, $opt_s2,          # split size
+$opt_j, $opt_n, $opt_x,   # scope
+$opt_t, $opt_m,           # speed
+$opt_c, $opt_d,           # output
+$opt_b, $opt_q, $opt_p,   # qsub
+$help
+);
+
+# Get parameters
+# ==============================================================================
+# |
+GetOptions(
+"g:s"     => \$opt_g,
+"k:i"     => \$opt_k,
+"u:i"     => \$opt_u,
+
+"s:i"     => \$opt_s,
+"s2:i"    => \$opt_s2,
+
+"x:i"     => \$opt_x,
+"j:i"     => \$opt_j,
+"n:i"     => \$opt_n,
+
+"t:i"     => \$opt_t,
+"m:i"     => \$opt_m,
+
+"c:s"     => \$opt_c,
+"d:s"     => \$opt_d,
+
+"b:s"     => \$opt_b,
+"q:s"     => \$opt_q,
+"p:s"     => \$opt_p,
+
+"help|h"  => \$help,
+);
+
+my($ref, $query) = @ARGV;
+
+checkParam();
+
+$opt_g ||= -1;
+$opt_k ||= 17;
+
+$opt_g = abs_path($opt_g);
+
+$opt_u ||= 3;
+$opt_x ||= -1;
+
+$opt_s ||= 100;
+$opt_s *= 10**6;
+
+$opt_s2 ||= 1000;
+$opt_s2 *= 10**6;
+
+
+$opt_n ||= 20;
+$opt_t ||= 4;
+$opt_m ||= 1;
+$opt_j ||= 1 if($opt_m==1);
+$opt_j ||= 50 if($opt_m==2);
+
+$opt_d ||= "Align";
+
+$opt_b ||= "Align";
+$opt_q ||= "all.q";
+$opt_p ||= "wrbio";
+
+$ref   = abs_path($ref);
+$query = abs_path($query);
+$opt_d = abs_path($opt_d);
+# |
+# ==============================================================================
+
+
+# Software path
+# ==============================================================================
+# |
+my $SPLIT = "perl $Bin/splitFa.pl";
+my $BUILD = "$Bin/2bwt-builder";
+my $ALIGN = "$Bin/align_bwt";
+# |
+# ==============================================================================
+
+
+# Direcotory
+# ==============================================================================
+#
+my $shell_dir = "$opt_d/Shell";
+my $result_dir = "$opt_d/Split_A";
+
+mkdir "$opt_d";
+mkdir($shell_dir);
+mkdir($result_dir);
+
+chdir($opt_d);
+my $pwd = getcwd();
+# |
+# ==============================================================================
+
+
+# prepare input data
+# ==============================================================================
+#
+# split reference
+my @refs = splitFile($ref, "Split_D", $opt_s, 20);
+
+# split the query
+my @query;
+if($opt_s2>0)
+{
+    @query=splitFile($query, "Split_I", $opt_s2, 100);
+}else{
+    push(@query, $query);
+}
+# |
+# ==============================================================================
+
+
+
+# build index
+# ==============================================================================
+#
+my $cmd_file = "$shell_dir/BUILD.sh";
+my $ou_hdl = myOpen(">$cmd_file");
+for(my $i=0; $i<scalar(@refs); $i++)
+{
+    my $ref = abs_path($refs[$i]);
+    my $cmd = "$BUILD $ref";
+
+    my $shell = "build_$i.sh";
+    print $ou_hdl "$shell\t$cmd\n";
+}
+close $ou_hdl;
+qsub($cmd_file, $shell_dir, "1G", 1,
+            $opt_q, $opt_p, $opt_b, 20);
+#
+# ==============================================================================
+
+
+
+# align file
+# ==============================================================================
+#
+$cmd_file = "$shell_dir/ALIGN.SH";
+$ou_hdl = myOpen(">$cmd_file");
+
+my $index = 0;
+for(my $i=0; $i<=$#query; $i++)
+{
+    my $query = abs_path($query[$i]);
+    for(my $j=0; $j<=$#refs; $j++)
+    {
+        # output dir
+        $index++;
+        my $idx = int($index/500);
+        my $out_dir = "$result_dir/sub_$idx";
+        mkdir($out_dir) unless (-e $out_dir);
+
+        # output file
+        my $result = basename("${query}_$j.al");
+        my $ref = abs_path($refs[$j]);
+
+        # command
+        my $cmd = "source $Bin/source.sh && ";
+        $cmd .= "cd $out_dir && ";
+        $cmd .= "$ALIGN ";
+        $cmd .= "-g $opt_g " if(-e $opt_g);
+        $cmd .= "-k $opt_k -u $opt_u ";
+        $cmd .= "-x $opt_x -j $opt_j -n $opt_n ";
+        $cmd .= " -t $opt_t -m $opt_m ";
+        $cmd .= "$query $ref $out_dir/$result";
+
+        my $align_sh = "align_${i}_${j}.sh";
+        print $ou_hdl "$align_sh\t$cmd\n";
+    }
+}
+close $ou_hdl;
+
+qsub($cmd_file, $shell_dir, "10G", $opt_t,
+                $opt_q, $opt_p, $opt_b, 20);
+
+#
+# ==============================================================================
+
+
+# merge file
+# ==============================================================================
+#
+my $cmd = "cat $pwd/Split_A/sub_*/*.al > $pwd/align.al ";
+$cmd .= " && rm -r $pwd/Split_* ";
+
+my $merge_sh = "merge.sh";
+$cmd_file = "$shell_dir/MERGE.SH";
+outShell2("$merge_sh\t$cmd", $cmd_file);
+
+qsub($cmd_file, $shell_dir, "1G", 1,
+                $opt_q, $opt_p, $opt_b, 50);
+#
+# ==============================================================================
+
+
+
+# check parameters
+# ==============================================================================
+#
+sub checkParam
+{
+	if ($help || @ARGV != 2) {
+        die `pod2text $0`;
+    }
+}
+#
+# ==============================================================================
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use Qsub;
+use SeqIO;
+
+=head1 Name
+
+    Align_s.pl  --The Alignment Tool for illumina reads
+
+=head1 Usage
+
+    perl Align_s.pl [arguments] <reference.fa> <read.lst>
+
+    Argument List:
+                  -g <FILE>       the unique kmer(.h5 or .bit)
+                  -k <INT>        the kmer size of the unique graph[17]
+                  -u <INT>        the min unique kmer[3]
+
+                  -s <INT>        split the reference file, in unit of M[100].
+                  -n <INT>        max align number for query [2]
+                  -t <INT>        thread number[4]
+
+                  -d <DIR>        the output directory [Align]
+
+                  -b <STR>        the pro_name [align]
+                  -q <STR>        the queue of sge [dna.q,rna.q,reseq.q]
+                  -p <STR>        the project of sge [og]
+
+    <read.lst>:
+                  pe450 read1
+                  pe450 read2 
+
+=head1 Example
+
+perl Align -g k17.bit -k 17 -u 3 -n 10 ref.fa fq.lst
+
+=cut
+
+my(
+$opt_g, $opt_k, $opt_u,   # kmer
+$opt_s, $opt_s2,          # split size
+$opt_j, $opt_n, $opt_x,   # scope
+$opt_t, $opt_m,           # speed
+$opt_c, $opt_d,           # output
+$opt_b, $opt_q, $opt_p,   # qsub
+$help
+);
+
+# Get parameters
+# ==============================================================================
+# |
+GetOptions(
+"g:s"     => \$opt_g,
+"k:i"     => \$opt_k,
+"u:i"     => \$opt_u,
+
+"s:i"     => \$opt_s,
+"s2:i"    => \$opt_s2,
+
+"x:i"     => \$opt_x,
+"j:i"     => \$opt_j,
+"n:i"     => \$opt_n,
+
+"t:i"     => \$opt_t,
+"m:i"     => \$opt_m,
+
+"c:s"     => \$opt_c,
+"d:s"     => \$opt_d,
+
+"b:s"     => \$opt_b,
+"q:s"     => \$opt_q,
+"p:s"     => \$opt_p,
+
+"help|h"  => \$help,
+);
+
+my($ref, $query) = @ARGV;
+
+checkParam();
+
+$opt_g ||= -1;
+$opt_k ||= 17;
+
+$opt_g = abs_path($opt_g);
+
+$opt_u ||= 3;
+$opt_x ||= -1;
+
+$opt_s ||= 100;
+$opt_s *= 10**6;
+
+$opt_s2 ||= 1000;
+$opt_s2 *= 10**6;
+
+$opt_j ||= 1;
+$opt_n ||= 2;
+$opt_t ||= 4;
+$opt_m ||= 1;
+
+$opt_d ||= "Align";
+
+$opt_b ||= "Align";
+$opt_q ||= "all.q";
+$opt_p ||= "wrbio";
+
+$ref   = abs_path($ref);
+$query = abs_path($query);
+$opt_d = abs_path($opt_d);
+# |
+# ==============================================================================
+
+
+# Software path
+# ==============================================================================
+# |
+my $SPLIT = "perl $Bin/splitFa.pl";
+my $MERGE = "perl $Bin/mergeReads.pl";
+my $BUILD = "$Bin/2bwt-builder";
+my $ALIGN = "$Bin/align_bwt_s";
+# |
+# ==============================================================================
+
+
+# Read files
+# ==============================================================================
+# |
+my %read_hash;
+
+my $lst_hdl = myOpen($query);
+while (<$lst_hdl>) {
+  chomp;
+  my($lib, $file, $others) = split;
+  die "no input" if(!-e $file);
+  $file = abs_path($file);
+  $read_hash{$lib} .= "$file\t";
+}
+close $lst_hdl;
+# |
+# ==============================================================================
+
+
+# Direcotory
+# ==============================================================================
+#
+my $shell_dir = "$opt_d/Shell";
+my $result_dir = "$opt_d/Split_A";
+
+mkdir "$opt_d";
+mkdir($shell_dir);
+mkdir($result_dir);
+
+chdir($opt_d);
+my $pwd = getcwd();
+# |
+# ==============================================================================
+
+
+
+# build index
+# ==============================================================================
+#
+my @refs = splitFile($ref, "Split_D", $opt_s, 20);
+
+my $cmd_file = "$shell_dir/BUILD.sh";
+my $ou_hdl = myOpen(">$cmd_file");
+for(my $i=0; $i<scalar(@refs); $i++)
+{
+    my $ref = abs_path($refs[$i]);
+    my $cmd = "$BUILD $ref";
+
+    my $shell = "build_$i.sh";
+    print $ou_hdl "$shell\t$cmd\n";
+}
+close $ou_hdl;
+
+qsub($cmd_file, $shell_dir, "1G", 1,
+            $opt_q, $opt_p, $opt_b, 50);
+#
+# ==============================================================================
+
+
+
+# align file
+# ==============================================================================
+#
+$cmd_file = "$shell_dir/ALIGN.SH";
+$ou_hdl = myOpen(">$cmd_file");
+
+my $merge_cmd = "$shell_dir/MERGE.SH";
+my $cmd_hdl = myOpen(">$merge_cmd");
+
+while (my($lib, $reads) = each %read_hash)
+{
+    my($read1, $read2) = split(/\s+/, $reads);
+    for(my $j=0; $j<=$#refs; $j++)
+    {
+        # output dir
+        my $out_dir = "$result_dir/$lib";
+        mkdir($out_dir) unless (-e $out_dir);
+
+        # command
+        my $ref = abs_path($refs[$j]);
+
+        my $cmd = "";
+       
+        # source
+        $cmd .= "source $Bin/source.sh && ";
+       
+        # directory
+        $cmd .= "cd $out_dir && ";
+       
+        # merge reads
+        $cmd .= "$MERGE $read1 $read2 /dev/stdout | ";
+
+        # do alignment
+        $cmd .= "$ALIGN ";
+        $cmd .= "-g $opt_g " if(-e $opt_g);
+        $cmd .= "-k $opt_k -u $opt_u ";
+        $cmd .= "-x $opt_x -j $opt_j -n $opt_n ";
+        $cmd .= " -t $opt_t -m $opt_m ";
+        $cmd .= "/dev/stdin $ref $out_dir/${lib}_$j.tab";
+
+        # shell file
+        my $align_sh = "align_${lib}_$j.sh";
+        print $ou_hdl "$align_sh\t$cmd\n";
+    }
+
+    my $cmd = "cat $result_dir/$lib/*.tab > $pwd/$lib.tab && ";
+    $cmd .= "sort -k 1,1 -k 2,2 -o $pwd/$lib.tab -S 1g $pwd/$lib.tab && ";
+    $cmd .= "rm -r $result_dir/$lib\n";
+
+    my $shll = "merge_$lib.sh";
+    print $cmd_hdl "$shll\t$cmd\n";
+}
+close $ou_hdl;
+
+# alignment
+qsub($cmd_file, $shell_dir, "4G", $opt_t,
+                $opt_q, $opt_p, $opt_b, 50);
+
+# merge
+qsub($merge_cmd, $shell_dir, "1G", 1,
+                $opt_q, $opt_p, $opt_b, 50);
+
+#
+# ==============================================================================
+
+
+# check parameters
+# ==============================================================================
+#
+sub checkParam
+{
+	if ($help || @ARGV != 2) {
+        die `pod2text $0`;
+    }
+}
+#
+# ==============================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+use List::Util qw(max min);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <node.pos>  <out.graph> <min_occ:2>\n" if(@ARGV==0);
+
+my($infile, $outfile, $min_occ) = @ARGV;
+$min_occ ||= 2;
+
+my($in_hdl, $ou_hdl);
+
+# 记录连接关系
+# ==============================================================================
+# |
+my %nodes; # 记录节点，方便遍历
+my(%left_hash, %right_hash);
+
+$in_hdl = myOpen($infile);
+while (<$in_hdl>) 
+{
+	chomp;
+	next if(/^>/);
+	my @nodes = split;
+	my $num = @nodes;
+
+	# 记录两两连接关系
+	for(my $i=0; $i<$num; $i++)
+	{
+		# 左节点
+		my $left_node = $nodes[$i];
+		my($id1, $strand1, $pos1) = split(/,/, $left_node);
+
+		$left_node = "$id1,$strand1";
+		$nodes{$id1} = 1;
+
+		# 右节点
+		for(my $j=$i+1; $j<$num; $j++)
+		{
+			my $right_node = $nodes[$j];
+			my($id2, $strand2, $pos2) = split(/,/, $right_node);
+			
+			next if($id1 eq $id2);
+
+			my $dist = $pos2-$pos1;
+			next if($dist<300);
+			$right_node = "$id2,$strand2";
+			$right_hash{$left_node}{$right_node} .= "$dist\t";
+			$left_hash{$right_node}{$left_node}  .= "$dist\t";
+
+			my $left_node_r  = revLink($right_node);
+			my $right_node_r = revLink($left_node);
+
+			$left_hash{$right_node_r}{$left_node_r}  .= "$dist\t";
+			$right_hash{$left_node_r}{$right_node_r} .= "$dist\t";
+		}
+	}
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+
+# 进行连接
+# ==============================================================================
+# |
+my @scaffold;
+
+my $index = 0;
+my %parse_hash;	# 存储遍历的数据
+open FO, ">$outfile" or die $!;
+foreach my $ctg (keys %nodes)
+{
+	@scaffold = ();
+	next if(exists $parse_hash{$ctg});
+
+	# 向右连接
+	my $next = "$ctg,+";
+	while ($next ne "") {		
+		my($contig, $strand) = split(/,/, $next);
+
+		$parse_hash{$contig} = 1;
+		push(@scaffold, $next);
+		
+		$next = getNext($next, \%right_hash);
+	}
+
+	# 向左连接
+	@scaffold = revScf(@scaffold);
+	$next = $scaffold[-1];
+	$next = getNext($next, \%right_hash);
+	while ($next ne "") {
+		my($contig, $strand) = split(/,/, $next);
+
+		$parse_hash{$contig} = 1;
+		push(@scaffold, $next);
+		
+		$next = getNext($next, \%right_hash);
+	}
+
+	# 输出框架
+	$index++;
+	print FO ">backbone_$index\n";
+
+	my $pre_dist = 0;
+	my $num = scalar(@scaffold);
+	for(my $i=0; $i<$num; $i++){
+		my $link1 = $scaffold[$i];
+		my($dist_, $num_) = (0, 0);
+		if($i>0){
+			my $link2 = $scaffold[$i-1];
+			($num_, $dist_) = getLinkInfo($link2, $link1, \%right_hash);
+			$pre_dist += $dist_;
+		}
+		print FO "$link1,$pre_dist\t";
+	}
+	print FO "\n";
+}
+close FO;
+
+sub revScf
+{
+	my @scf = @_;
+	@scf = reverse(@scf);
+	for(my $i=0; $i<@scf; $i++)
+	{
+		my($id, $strand) = split(/,/, $scf[$i]);
+		my $strand_r = ($strand eq "+")? "-":"+";
+		$scf[$i] = "$id,$strand_r";
+	}
+	return @scf;
+}
+# |
+# ==============================================================================
+
+
+# 取得下一个节点
+# ==============================================================================
+# |
+sub getNext{
+	my($link) = @_;
+	my $next_link = "";
+
+	my @link2s = keys %{$right_hash{$link}};
+	my @array = sortLinks($link, \@link2s, \%right_hash, $min_occ);
+	
+	return "" if(@array==0);
+
+	# 判定这个节点是否被支持
+	my $end_link = (split(/\s+/,$array[-1]))[0];
+	for(my $i=0; $i<@array; $i++)
+	{
+		my($link2, $num, $dist, $error_num) = split(/\s+/, $array[$i]);
+		my($contig, $strand) = split(/,/, $link2);
+
+		# next if($error_num>2);
+		next if(exists $parse_hash{$contig});
+		if($link2 ne $end_link){
+			next if(!exists $right_hash{$link2}{$end_link});
+		}
+
+		if($link2 eq $end_link){
+			next if($dist<2000);
+		}
+
+		# 左边最远距离结点
+		my @link3s = keys %{$left_hash{$link2}};
+		my @array3 = sortLinks($link2, \@link3s, \%left_hash, $min_occ);
+		next if(@array3==0);
+		my $link3 = (split(/\s+/,$array3[-1]))[0];
+		if($link3 ne $link){
+			next if(!exists $right_hash{$link3}{$link});
+		}
+
+		$next_link = $link2;
+		last;
+	}
+	return $next_link;
+}
+
+
+sub sortLinks{
+	my($start, $links_arr, $hash_ref, $min_occ) = @_;
+	$min_occ ||= 2;
+
+	my @array;
+	foreach my $link(@{$links_arr})
+	{
+		my($num, $dist, $error_num) = getLinkInfo($start, $link, $hash_ref);
+		next if($num<$min_occ);
+		push(@array, "$link $num $dist $error_num");
+	}
+	@array = sort by_link_dist @array;	
+	return @array;
+}
+
+sub getLinkInfo
+{
+	my($link1, $link2, $hash_ref) = @_;
+	my $info = ${$hash_ref}{$link1}{$link2};
+	
+	my @dist_arr = split(/\s+/, $info);
+	@dist_arr = sort @dist_arr;
+	
+	my $num = scalar @dist_arr;
+	my $dist = $dist_arr[$num/2];
+
+	my $error_num = 0;
+	foreach my $dist1(@dist_arr){
+		my $min = min($dist1, $dist);
+		next if($min==0);
+
+		my $distant = abs($dist-$dist1);
+		my $perc = $distant/$min;
+		$error_num++ if($perc>0.15 && $distant>100);
+	}
+	return($num, $dist, $error_num);
+}
+
+sub by_link_dist{
+	my($link1, $num1, $dist1, $error_num1) = split(/\s+/, $a);
+	my($link2, $num2, $dist2, $error_num2) = split(/\s+/, $b);
+	return $dist1<=>$dist2;
+}
+# |
+# ==============================================================================
+
+
+
+# 反转节点
+# ==============================================================================
+# |
+sub revLink{
+	my $link = shift;
+	my($contig, $strand) = split(/,/, $link);
+	if($strand eq "+"){
+		$strand = "-";
+	}else{
+		$strand = "+";
+	}
+	return "$contig,$strand";
+}
+# |
+# ==============================================================================
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <filt.al> <out.graph>\n" if(@ARGV==0);
+
+my($infile, $outfile) = @ARGV;
+
+# 记录被包含的序列
+# ==============================================================================
+# |
+my %short_hash;
+
+my $in_hdl = myOpen($infile);
+while (<$in_hdl>) {
+	chomp;
+	my($q_id, $t_id, $q_len, $t_len,
+		$strand, $ovl, $q_pos, $t_pos, $score) = split;
+
+	if($q_len==$t_len && $q_len<=$ovl)
+	{
+		$short_hash{$q_id} = 1 if($q_id lt $t_id);
+		$short_hash{$t_id} = 1 if($t_id lt $q_id);
+		next;
+	}
+
+	$short_hash{$q_id} = 1 if($q_len<=$ovl);
+	$short_hash{$t_id} = 1 if($t_len<=$ovl);
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+# 记录连接关系
+# ==============================================================================
+# |
+my %nodes; # 记录节点，方便遍历
+my(%left_hash, %right_hash);
+
+$in_hdl = myOpen($infile);
+while (<$in_hdl>)
+{
+	chomp;
+	my($q_id, $t_id, $q_len, $t_len,
+		$strand, $ovl, $q_pos, $t_pos, $score) = split;
+
+	next if(exists $short_hash{$q_id});
+	next if(exists $short_hash{$t_id});
+
+	# record the node #
+	my $left_node  = "$q_id,$strand,$q_len";
+	my $right_node = "$t_id,+,$t_len";
+	if($q_pos<$t_pos)
+	{
+		$left_node  = "$t_id,+,$t_len";
+		$right_node = "$q_id,$strand,$q_len";
+	}
+	$right_hash{$left_node}{$right_node} = "$ovl $score";
+	$left_hash{$right_node}{$left_node}  = "$ovl $score";
+
+	# reverse the node #
+	my $left_node_r  = revLink($right_node);
+	my $right_node_r = revLink($left_node);
+
+	$left_hash{$right_node_r}{$left_node_r}  = "$ovl $score";
+	$right_hash{$left_node_r}{$right_node_r} = "$ovl $score";
+
+	# record nodes #
+	$nodes{$left_node}  = 1;
+	$nodes{$right_node} = 1;
+	$nodes{$left_node_r}  = 1;
+	$nodes{$right_node_r} = 1;
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+# 进行连接
+# ==============================================================================
+# |
+my %parse_hash;	# 存储遍历的数据
+open FO, ">$outfile" or die $!;
+foreach my $link (keys %nodes)
+{
+	my @scaffold;
+
+	my($contig, $strand, $len) = split(/,/, $link);
+	next if(exists $parse_hash{$contig});
+
+	my $next = $link;
+	# 向右连接
+	while ($next ne "") {
+		my($contig, $strand, $len) = split(/,/, $next);
+		push(@scaffold, $next);
+		$parse_hash{$contig} = 1;
+
+		$next = getNext($next, \%right_hash);
+	}
+
+	# 向左连接
+	$next = getNext($link, \%left_hash);
+	while ($next ne "") {
+		my($contig, $strand, $len) = split(/,/, $next);
+		@scaffold = ($next, @scaffold);
+		$parse_hash{$contig} = 1;
+
+		$next = getNext($next, \%left_hash);
+	}
+
+	# 输出
+	for(my $i=0; $i<=$#scaffold; $i++)
+	{
+		my $link1 = $scaffold[$i];
+		my $ovl = 0;
+		if($i<$#scaffold)
+		{
+			my $link2 = $scaffold[$i+1];
+			my($ovl_, $score, $extend) = getLinkInfo($link1, $link2, \%right_hash);
+			$ovl = $ovl_;
+
+			# 去掉被包含的序列 #
+			my @others = keys %{$right_hash{$link1}};
+			foreach my $other(@others)
+			{
+				my($id, $strand, $len) = split(/,/, $other);
+				next if(exists $parse_hash{$id});
+
+				if(exists $left_hash{$other}{$link2} or
+						exists $right_hash{$other}{$link2})
+				{
+					$parse_hash{$id} =1;
+					$short_hash{$id} =1;
+				}
+			}
+		}
+		print FO "$link1,$ovl\t";
+	}
+	print FO "\n";
+}
+close FO;
+# |
+# ==============================================================================
+
+# 输出要过滤的序列ID
+# ==============================================================================
+# |
+open FO,">short.lst";
+foreach my $id(keys %short_hash)
+{
+	print FO "$id\n";
+}
+close FO;
+# |
+# ==============================================================================
+
+
+
+# 取得两个节点的连接长度、分数、连完后的长度
+# ==============================================================================
+# |
+sub getLinkInfo
+{
+	my($link1, $link2, $hash_ref) = @_;
+	my $info = ${$hash_ref}{$link1}{$link2};
+
+	my($id1, $strand1, $len1) = split(/,/, $link1);
+	my($id2, $strand2, $len2) = split(/,/, $link2);
+
+	my($ovl, $score) = split(/\s+/, $info);
+	my $extend = $len1+$len2-$ovl;
+
+	return($ovl, $score, $extend);
+}
+# |
+# ==============================================================================
+
+
+# 按连接的分数排序
+# ==============================================================================
+# |
+sub by_link_score{
+	my($link1, $ovl1, $score1, $extend1) = split(/\s+/, $a);
+	my($link2, $ovl2, $score2, $extend2) = split(/\s+/, $b);
+
+	return $score2<=>$score1;
+}
+
+sub by_link_ovl{
+	my($link1, $ovl1, $score1, $extend1) = split(/\s+/, $a);
+	my($link2, $ovl2, $score2, $extend2) = split(/\s+/, $b);
+
+	return $ovl2<=>$ovl1;
+}
+# |
+# ==============================================================================
+
+
+
+# 对节点进行排序
+# ==============================================================================
+# |
+sub sortLinks{
+	my($start, $links_arr, $hash_ref) = @_;
+	my @array;
+	foreach my $link(@{$links_arr})
+	{
+		my($ovl, $score, $extend) = getLinkInfo($start, $link, $hash_ref);
+		push(@array, "$link $ovl $score $extend");
+	}
+	# 从大肠肝菌的数据来看
+	# 用overlap来连接和判断准确度最高
+	@array = sort by_link_ovl @array;
+	return @array;
+}
+# |
+# ==============================================================================
+
+
+
+# 取得下一个节点
+# ==============================================================================
+# |
+sub getNext{
+	my($link, $hash_ref) = @_;
+	my $next_link = "";
+
+	my @link2s = keys %{${$hash_ref}{$link}};
+	my @array = sortLinks($link, \@link2s, $hash_ref);
+
+	foreach my $next (@array){
+		my($link2, $ovl, $score, $extend) = split(/\s+/, $next);
+		my($contig, $strand, $len) = split(/,/, $link2);
+		next if(exists $parse_hash{$contig});
+
+		if(isBest($link, $link2))
+		{
+			$next_link = $link2;
+			last;
+		}
+	}
+	return $next_link;
+}
+# |
+# ==============================================================================
+
+
+# 是否是end_link的最好节点
+# ==============================================================================
+# |
+sub isBest{
+	my($start_link, $end_link) = @_;
+
+	my $hash_ref = \%right_hash;
+	$hash_ref = \%left_hash if(exists $left_hash{$end_link}{$start_link});
+
+	my @link2s = keys %{${$hash_ref}{$end_link}};
+	return 1 if(@link2s==1);
+
+	my @array = sortLinks($end_link, \@link2s, $hash_ref);
+	my($link2, $ovl, $score, $extend) = split(/\s+/, $array[0]);
+
+	return 1 if($link2 eq $start_link);
+	return 1 if(exists $right_hash{$link2}{$start_link});
+	return 1 if(exists $left_hash{$link2}{$start_link});
+
+	return 0;
+}
+# |
+# ==============================================================================
+
+
+# 反转节点
+# ==============================================================================
+# |
+sub revLink{
+	my $link = shift;
+	my($contig, $strand, $len) = split(/,/, $link);
+	if($strand eq "+"){
+		$strand = "-";
+	}else{
+		$strand = "+";
+	}
+	return "$contig,$strand,$len";
+}
+# |
+# ==============================================================================
+use strict;
+use warnings;
+
+die "perl $0 <link.info> <out.graph> <min_conn:2> <min_dist:10> <strategy:1>\n" if(@ARGV==0);
+
+my($infile, $outfile, $min_conn, $min_dist, $strategy) = @ARGV;
+$min_conn ||= 2;
+$min_dist ||= 10;
+$strategy ||= 1;
+
+# 记录连接关系
+# ==============================================================================
+# |
+my %nodes; # 记录节点，方便遍历
+
+my(%left_hash, %right_hash);
+open FI, $infile or die $!;
+while (<FI>) {
+	my($pre_pb, $link1, $link2, $dist) = split;
+
+    next if($dist<$min_dist);
+
+	$right_hash{$link1}{$link2} .= "$dist ";
+	$left_hash{$link2}{$link1} .= "$dist ";
+
+	$nodes{$link1} = 1;
+	$nodes{$link2} = 1;
+
+	# record the other strand chrome
+	$link1 = revLink($link1);
+	$link2 = revLink($link2);
+
+	$right_hash{$link2}{$link1} .= "$dist ";
+	$left_hash{$link1}{$link2} .= "$dist ";
+
+	$nodes{$link1} = 1;
+	$nodes{$link2} = 1;
+}
+close FI;
+
+# 清除不符合条件的连接
+cleanLink(\%left_hash);
+cleanLink(\%right_hash);
+# |
+# ==============================================================================
+
+
+# 进行连接
+# ==============================================================================
+# |
+my %parse_hash;	# 存储遍历的数据
+open FO, ">$outfile" or die $!;
+foreach my $link (keys %nodes)
+{
+	my @scaffold;
+
+	my($contig, $strand, $len) = split(/,/, $link);
+	next if(exists $parse_hash{$contig});
+
+	my $next = $link;
+	# 向右连接
+	while ($next ne "") {
+		my($contig, $strand, $len) = split(/,/, $next);
+		push(@scaffold, $next);
+		$parse_hash{$contig} = 1;
+
+		$next = getNext($next, \%right_hash);
+	}
+
+	# 向左连接
+	$next = getNext($link, \%left_hash);
+
+	while ($next ne "") {
+		my($contig, $strand, $len) = split(/,/, $next);
+		@scaffold = ($next, @scaffold);
+		$parse_hash{$contig} = 1;
+
+		$next = getNext($next, \%left_hash);
+	}
+
+	# 输出
+	for(my $i=0; $i<=$#scaffold; $i++)
+	{
+		my $link1 = $scaffold[$i];
+		my $distant = 0;
+		if($i<$#scaffold)
+		{
+			my $link2 = $scaffold[$i+1];
+			my($dist, $num) = getLinkInfo($link1, $link2, \%right_hash);
+			$distant = $dist;
+		}
+		print FO "$link1,$distant\t";
+	}
+	print FO "\n";
+}
+close FO;
+# |
+# ==============================================================================
+
+
+# 按连接的条数排序
+# ==============================================================================
+# |
+sub by_link_num{
+	my($link1, $num1, $dist1) = split(/\s+/, $a);
+	my($link2, $num2, $dist2) = split(/\s+/, $b);
+
+	return $num2<=>$num1 if($num1 != $num2);
+	return $dist1<=>$dist2;
+}
+
+sub by_link_dist{
+	my($link1, $num1, $dist1) = split(/\s+/, $a);
+	my($link2, $num2, $dist2) = split(/\s+/, $b);
+
+	return $dist1<=>$dist2;
+}
+# |
+# ==============================================================================
+
+
+# 取得两个节点的连接距离和支持数
+# ==============================================================================
+# |
+sub getLinkInfo
+{
+	my($link1, $link2, $hash_ref) = @_;
+	my $dist_info = ${$hash_ref}{$link1}{$link2};
+	my @dists = split(/\s+/,$dist_info);
+	@dists = sort {return $a<=>$b} @dists;
+	my $num = scalar @dists;
+	my $mediant = $dists[$num/2];
+
+	return($mediant, $num);
+}
+# |
+# ==============================================================================
+
+
+# 取得下一个节点
+# ==============================================================================
+# |
+sub getNexts{
+	my($link, $hash_ref, $sort) = @_;
+	# sort
+	# 1: by link num
+	# 2: by link distant
+	$sort ||= 1;
+
+	my @array;
+	my @link2s = keys %{${$hash_ref}{$link}};
+	foreach my $link2(@link2s)
+	{
+		my($mediant, $num) = getLinkInfo($link, $link2, $hash_ref);
+		push(@array, "$link2 $num $mediant");
+	}
+	@array = sort by_link_num @array if($sort == 1);
+	@array = sort by_link_num @array if($sort == 2);
+	return @array;
+}
+
+sub getNext{
+	my($link, $hash_ref) = @_;
+	my $next_link = "";
+
+	my @array = getNexts($link, $hash_ref);
+
+	foreach my $next (@array){
+		my($link2, $num, $dist) = split(/\s+/, $next);
+		my($contig, $strand, $len) = split(/,/, $link2);
+
+		next if(exists $parse_hash{$contig});
+		next if(!isBest($link, $link2));
+
+		$next_link = $link2;
+		last;
+	}
+	return $next_link;
+}
+# |
+# ==============================================================================
+
+# 判断是否能连接
+# ==============================================================================
+# |
+sub isBest{
+	my($start_link, $end_link) = @_;
+
+    return 1 if($strategy !=1);
+
+	my $hash_ref = \%right_hash;
+	$hash_ref = \%left_hash if(exists $left_hash{$end_link}{$start_link});
+
+	my @array = getNexts($end_link, $hash_ref, 2);
+	my($link2, $num, $dist) = split(/\s+/, $array[-1]);
+
+	return 1 if($link2 eq $start_link);
+	return 1 if(exists $right_hash{$link2}{$start_link});
+	return 1 if(exists $left_hash{$link2}{$start_link});
+
+	return 0;
+}
+# |
+# ==============================================================================
+
+
+# 反转节点
+# ==============================================================================
+# |
+sub revLink{
+	my $link = shift;
+	my($contig, $strand, $len) = split(/,/, $link);
+	if($strand eq "+"){
+		$strand = "-";
+	}else{
+		$strand = "+";
+	}
+	return "$contig,$strand,$len";
+}
+# |
+# ==============================================================================
+
+
+# 清除不满足条件的连接
+# ==============================================================================
+# |
+sub cleanLink{
+	my $hash_ref = shift;
+	foreach my $link1(%{$hash_ref})
+	{
+		my @link2s = keys %{${$hash_ref}{$link1}};
+		foreach my $link2(@link2s)
+		{
+			my $dist_info = ${$hash_ref}{$link1}{$link2};
+			my @dists = split(/\s+/,$dist_info);
+			if(@dists<$min_conn){
+				delete ${$hash_ref}{$link1}{$link2};
+			}
+		}
+	}
+}
+# |
+# ==============================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <backbone.fasta> <subread.fasta> <thread:4> <min_occ:1>\n" if(@ARGV==0);
+
+# 读入参数
+# ==============================================================================
+# |
+my($infile, $subread, $thread, $min_occ) = @ARGV;
+$infile = abs_path($infile);
+$subread = abs_path($subread);
+
+$thread ||= 4;
+$min_occ ||= 1;
+
+# 如果已存在被纠错，则退出
+exit(1) if(-e "$infile.consensus");
+
+my $dir_name = basename($infile).".dir";
+mkdir "$dir_name";
+chdir($dir_name);
+# |
+# ==============================================================================
+
+
+
+
+# 进行纠错
+# ==============================================================================
+# |
+cutFiles("subread.fasta", $subread, $infile);
+
+my $input = $infile;
+my $outfile;
+for(my $i=0; $i<3; $i++)
+{
+	my $cmd = "source $Bin/source.sh\n";
+	$cmd .= "$Bin/blasr subread.fasta $input -out mapped.m5 ";
+	$cmd .= "-fastSDP -minMatch 14 -bestn 1 -m 5  -nproc $thread\n";
+	$cmd .= "sort -k 6,6 -k 8,8n mapped.m5 -o mapped.m5 -S 1G -T ./ \n";
+	$cmd .= "pbdagcon -c $min_occ -j $thread mapped.m5 > consensus.$i.fasta 2>log\n";
+
+	system($cmd);
+	$outfile = "consensus.$i.fasta";
+	$input  = $outfile;
+}
+
+# |
+# ==============================================================================
+
+
+
+# 整理结果
+# ==============================================================================
+# |
+my $cmd  = "cd ..\n";
+$cmd .= "mv $dir_name/$outfile $infile.consensus\n";
+$cmd .= "rm -r $dir_name\n";
+
+system($cmd);
+# |
+# ==============================================================================
+
+
+
+# 对数据进行剪切
+# ==============================================================================
+# |
+sub cutFiles{
+	my $MAX_LEN = 50000;
+    my $OVL = 1000;
+
+	my ($outfile, @files) = @_;
+	my $ou_hdl = myOpen(">$outfile");
+	foreach my $file(@files){
+		my($id, $seq);
+		my $in_hdl = myOpen($file);
+		while (getSeq($in_hdl, \$id, \$seq)!=-1)
+		{
+			my $len = length($seq);
+			for(my $i=0; $i<$len; $i+=$MAX_LEN-$OVL)
+			{
+				my $sub_seq = substr($seq, $i, $MAX_LEN);
+				print $ou_hdl ">$id|$i\n$sub_seq\n";
+			}
+		}
+	}
+	close $ou_hdl;
+}
+# |
+# ==============================================================================
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use Qsub;
+use SeqIO;
+
+die "perl $0 <dir_consensus> <queue:dna.q,rna.q,reseq.q> <Project:og> <pro_name:class_$$>\n" if(@ARGV==0);
+
+my($dir_corr, $queue, $Project, $pro_name) = @ARGV;
+$dir_corr = abs_path($dir_corr);
+
+$queue ||= "all.q";
+$Project ||= "wrbio";
+$pro_name ||= "class_$$";
+
+# Software path
+# ==============================================================================
+# |
+my $PBDAGCON  = "perl $Bin/pbdagcon.pl";
+# |
+# ==============================================================================
+
+
+
+# Do consensus
+# ==============================================================================
+#
+mkdir("Shell");
+chdir("Shell");
+
+my $list = `ls $dir_corr/*/*.subread.fasta`;
+my @files = split(/\n/, $list);
+my @shell_cors;
+
+# generate correct shells #
+my $cmd = "";
+my $index = 0;
+foreach my $read (@files)
+{
+    my $sub_ref = $read;
+    $sub_ref =~ s/\.subread//;
+
+    my $dir = dirname($read);
+    $cmd .= "cd $dir\n";
+    $cmd .= "$PBDAGCON  $sub_ref $read 4 3\n";
+
+    $index++;
+    outCor()  if($index%20==0);
+}
+outCor();
+
+# generate config file #
+open FO, ">Correct.cfg" or die $!;
+foreach my $shell(@shell_cors){
+    print FO "$shell:5G\n";
+}
+close FO;
+
+# qsub jobs
+qsub2("Correct.cfg", 4, $queue, $Project, $pro_name, 50);
+
+# cat files
+$cmd  = "cd $dir_corr\n";
+$cmd .= "cat $dir_corr/*/*.consensus > correct.fa";
+system($cmd);
+
+sub outCor
+{
+    return if($cmd eq "");
+    my $index2 = int($index/20);
+    my $shell = abs_path("pbdagcon_$index2.sh");
+
+    $cmd .= "echo done";
+    outShell2($cmd, $shell);
+    push(@shell_cors, $shell);
+
+    $cmd = "";
+}
+#|
+#
+# ==============================================================================
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <class.tab> <pacbio.fa> <outdir:Split>\n" if(@ARGV==0);
+
+my($classfile, $readfile, $outdir) = @ARGV;
+$outdir ||= "Split";
+
+my $in_hdl;
+my $ou_hdl;
+my $outfile = "temp.fa";
+# 对pacbio的read进行聚类
+# ==============================================================================
+# |
+debug("Loading class file...");
+my %pb_tag_hash;
+
+my $index = 0;
+my $pre_tag = "";
+my @array = ();
+$in_hdl = myOpen("$classfile");
+while (<$in_hdl>) 
+{
+	chomp;
+	my($tag, $pb, $len) = split;
+	record() if($pre_tag ne $tag);
+	push(@array, $pb);
+	$pre_tag = $tag;
+}
+close $in_hdl;
+record();
+# |
+# ==============================================================================
+
+
+
+# 对pacbio数据进行格式转换
+# ==============================================================================
+# |
+debug("Loading pacbio file...");
+
+my($id, $seq);
+$in_hdl = myOpen($readfile);
+$ou_hdl = myOpen(">$outfile");
+while (getSeq($in_hdl, \$id, \$seq)!=-1) 
+{
+	next if(!exists $pb_tag_hash{$id});
+	my $tags = 	$pb_tag_hash{$id};
+	my @tag_arr = split(/\s+/, $tags);
+
+	my $len = length($seq);
+	foreach my $tag(@tag_arr)
+	{
+		print $ou_hdl "$tag\t$len\t$id\t$seq\n";
+	}
+}
+close $in_hdl;
+close $ou_hdl;
+
+
+`sort -k 1,1n -k 2,2nr -S 5G -o $outfile $outfile`;
+# |
+# ==============================================================================
+
+
+
+# 对每个文件进行拆分
+# ==============================================================================
+# |
+debug("Split File...");
+$outfile = abs_path($outfile);
+
+mkdir($outdir);
+chdir($outdir);
+
+$index = -1;
+@array = ();
+$pre_tag = -1;
+my $base  = 0;
+
+my $max_base = 30000000;
+$in_hdl = myOpen($outfile);
+while (<$in_hdl>) 
+{
+	chomp;
+	my($tag, $len, $id, $seq) = split;
+	output() if($pre_tag!=$tag && $base>$max_base);
+	push(@array, "$tag\t$id\t$seq");
+
+	$pre_tag = $tag;
+	$base += length($seq);
+}
+close $in_hdl;
+# |
+# ==============================================================================
+`rm $outfile`;
+
+
+# 
+# ==============================================================================
+# |
+sub output
+{
+	return if(@array==0);
+	my $num_dir = 50;
+
+	$index++;
+	my $dir_idx = int($index/$num_dir);
+	my $sub_dir = "sub_$dir_idx";
+	mkdir($sub_dir) if(!-e $sub_dir);
+	
+	my %id_hash;
+	my $tag0 = "";
+	my $out_hdl1 = myOpen(">$sub_dir/split_$index.fasta");
+	my $out_hdl2 = myOpen(">$sub_dir/split_$index.subread.fasta");
+	foreach(@array)
+	{
+		my($tag, $id, $seq) = split;
+		next if(exists $id_hash{$id});
+		$id_hash{$id} = 1;
+
+		print $out_hdl1 ">$id\n$seq\n" if($tag ne $tag0);
+		print $out_hdl2 ">$id\n$seq\n";
+		$tag0 = $tag;
+	}
+	close $out_hdl1;
+	close $out_hdl2;
+
+	$base  = 0;
+	@array = ();
+}
+# |
+# ==============================================================================
+
+
+# 
+# ==============================================================================
+# |
+sub record{
+	return if(@array==0);
+	
+	$index++;
+	foreach(@array)
+	{
+		$pb_tag_hash{$_} .= "$index ";
+	}	
+	@array = ();
+}
+# |
+# ==============================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <filt.al> <outfile>\n" if(@ARGV==0);
+
+my($infile, $outfile) = @ARGV;
+
+# 将read和contig转化成编号，节省内存
+# ==============================================================================
+# |
+my @pbc_arr;
+my @ctg_arr;
+
+my %pbc2idx_hash;
+my %ctg2idx_hash;
+
+my $ctg_len = 0;
+my $pbc_len = 0;
+my $in_hdl = myOpen($infile);
+while (<$in_hdl>) 
+{
+	chomp;
+	my($q_id, $t_id, $q_len, $t_len,
+		$strand, $ovl, $q_pos, $t_pos, $score) = split;
+
+	if(!exists $pbc2idx_hash{$q_id}){
+		push(@pbc_arr, $q_id);
+		$pbc2idx_hash{$q_id} = $#pbc_arr;
+		$pbc_len += $q_len;
+	}
+
+	if(!exists $ctg2idx_hash{$t_id}){
+		push(@ctg_arr, $t_id);
+		$ctg2idx_hash{$t_id} = $#ctg_arr;
+		$ctg_len += $t_len;
+	}
+}
+close $in_hdl;
+debug("total pacbio len: $pbc_len");
+debug("total contig len: $ctg_len");
+# |
+# ==============================================================================
+
+
+
+# 记录contig对应的pacbio
+# 记录pacbio对应的contig
+# ==============================================================================
+# |
+
+my %ctg_pbc_hash;
+my %pbc_ctg_hash;
+$in_hdl = myOpen($infile);
+while (<$in_hdl>) 
+{
+	chomp;
+	my($q_id, $t_id, $q_len, $t_len,
+		$strand, $ovl, $q_pos, $t_pos, $score) = split;
+
+	my $pbc_idx = $pbc2idx_hash{$q_id};
+	my $ctg_idx = $ctg2idx_hash{$t_id};
+
+	$ctg_pbc_hash{$ctg_idx}{$pbc_idx} = $q_len;
+	$pbc_ctg_hash{$pbc_idx}{$ctg_idx}++;
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+
+# 输出每个tag对应的pacbio
+# ==============================================================================
+# |
+debug("Class reads...");
+my %ctg_hash;
+my $max_pbc_num=20;
+my $min_ctg_num=10;
+
+my $ou_hdl = myOpen(">$outfile");
+foreach my $ctg_idx (keys %ctg_pbc_hash)
+{
+	next if(exists $ctg_hash{$ctg_idx});
+	$ctg_hash{$ctg_idx} = 1;
+
+	my @pacbio_arr = keys %{$ctg_pbc_hash{$ctg_idx}};
+	
+	# get the related pacbio
+	my @array;
+	foreach my $pbc_idx (@pacbio_arr)
+	{
+		my $len =  $ctg_pbc_hash{$ctg_idx}{$pbc_idx};
+		push(@array, "$pbc_idx $len");
+	}
+	@array = sort by_len(@array);
+
+	# get related contig
+	my $pb_num = 0;
+	my %temp_hash;
+	foreach(@array)
+	{
+		$pb_num++;
+		my($pbc_idx, $len) = split;
+		print $ou_hdl "$ctg_arr[$ctg_idx]\t$pbc_arr[$pbc_idx]\t$len\n";
+
+		my @ctg_idxs = keys %{$pbc_ctg_hash{$pbc_idx}};
+		foreach(@ctg_idxs){
+			$temp_hash{$_}++;
+		}
+		last if($pb_num>$max_pbc_num);
+	}
+
+	while (my($ctg_idx, $num) = each %temp_hash) 
+	{
+		next if(exists $ctg_hash{$ctg_idx});
+		next if($num<$min_ctg_num);
+		$ctg_hash{$ctg_idx} = $num;
+		# debug("log $ctg_idx");
+	}
+}
+close $ou_hdl;
+# |
+# ==============================================================================
+
+
+
+# 排序
+# ==============================================================================
+# |
+sub by_len
+{
+	my($id1, $len1) = split(/\s+/, $a);
+	my($id2, $len2) = split(/\s+/, $b);
+
+	return $len2<=>$len1;
+}
+# |
+# ==============================================================================
+
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use Qsub;
+use SeqIO;
+
+=head1 Name
+
+    Class.pl  --Class raw pacbio reads with contig and correct pacbio reads.
+
+=head1 Usage
+
+    perl Class.pl [arguments] <contig.fa> <pb.lst>
+
+    Argument List:
+                  -g <FILE>       the unique kmer(.h5 or .bit)
+                  -k <INT>        the kmer size of the unique graph[17]
+
+                  -t <INT>        thread number[4]
+                  -m <INT>        filter length short than this value[1000] 
+
+                  -d <DIR>        the output directory [Class]
+
+                  -b <STR>        the pro_name [pb_cor]
+                  -q <STR>        the queue of sge [dna.q,rna.q,reseq.q]
+                  -p <STR>        the project of sge [og]
+
+
+=head1 Example:
+
+  perl Class.pl -g k17.bit -k 17 contig.fa pb.lst
+
+pb.lst:
+
+  pacbio.1.fasta(q)
+  pacbio.2.fasta(q)
+  ...
+
+=cut
+
+my(
+$opt_g, $opt_k,
+$opt_t, $opt_m,           # speed
+$opt_d, $help,            # output
+$opt_b, $opt_q, $opt_p    # qsub
+);
+
+# Get parameters
+# ==============================================================================
+# |
+GetOptions(
+"g:s"     => \$opt_g,
+"k:i"     => \$opt_k,
+
+"t:i"     => \$opt_t,
+"m:i"     => \$opt_m,
+
+"d:s"     => \$opt_d,
+"help|h"  => \$help,
+
+"b:s"     => \$opt_b,
+"q:s"     => \$opt_q,
+"p:s"     => \$opt_p,
+);
+
+my($ref, $list) = @ARGV;
+
+checkParam();
+
+$opt_g ||= -1;
+$opt_k ||= 17;
+$opt_g = abs_path($opt_g);
+
+$opt_t ||= 4;
+$opt_m ||= 1000;
+
+$opt_d ||= "Class";
+$opt_d = abs_path($opt_d);
+
+$opt_b ||= "pb_cor";
+$opt_q ||= "dna.q,rna.q,reseq.q";
+$opt_p ||= "og";
+# |
+# ==============================================================================
+
+
+# Software path
+# ==============================================================================
+# |
+my $CTG   = "perl $Bin/get_scaftig.pl ";
+my $CUT = "perl $Bin/cutFa.pl";
+my $MERGE = "perl $Bin/splitFQ.pl ";
+
+my $ALIGN = "perl $Bin/Align.pl";
+my $FILTER = "perl $Bin/filtAl.pl";
+
+my $CLASS = "perl $Bin/class.pl";
+my $CLASS_PB = "perl $Bin/class_pb.pl";
+my $CORRECT = "perl $Bin/class_corr.pl";
+
+# |
+# ==============================================================================
+
+
+# Direcotory
+# ==============================================================================
+#
+my $dir_data  = "$opt_d/Data";
+my $dir_align = "$opt_d/Align";
+my $dir_corr  = "$opt_d/Result";
+my $dir_shell = "$opt_d/Shell";
+
+mkdir "$opt_d";
+mkdir "$dir_data";
+mkdir "$dir_corr";
+
+my $pwd = getcwd();
+# |
+# ==============================================================================
+
+
+
+# Prepare Data
+# ==============================================================================
+#
+debug("prepare data..");
+
+my $pb_data = "$dir_data/pb.fasta";
+my $contig  = "$dir_data/contig.fasta";
+
+my $cmd = "";
+$cmd .= "$CTG $ref | $CUT /dev/stdin $contig 5000\n";
+$cmd .= "$MERGE $list $pb_data $opt_m\n";
+
+system($cmd);
+# |
+# ==============================================================================
+
+
+
+# Do alignment
+# ==============================================================================
+#
+$cmd = "$ALIGN -g $opt_g -k $opt_k -u 3 -s 400 -s2 1000 ";
+$cmd .= "-x -1 -j 1 -n 1 -t $opt_t -d $dir_align ";
+$cmd .= "-b $opt_b -p $opt_p -q $opt_q ";
+$cmd .= "$contig $pb_data";
+
+debug($cmd);
+system($cmd);
+# |
+# ==============================================================================
+
+
+
+# Split sequences into small files
+# ==============================================================================
+#
+chdir($dir_corr);
+
+$cmd  = "cd $dir_corr && ";
+$cmd .= "$FILTER $dir_align/align.al filt.al && ";
+$cmd .= "$CLASS filt.al class.tab && ";
+$cmd .= "$CLASS_PB class.tab $pb_data Split";
+
+my $cmd_file = "CLASS.CFG";
+outShell2("class.sh\t$cmd", $cmd_file);
+
+qsub($cmd_file, "$dir_corr/Shell", "15G", 1,
+                      $opt_q, $opt_p, $opt_b, 50);
+#
+# ==============================================================================
+
+
+
+
+# Do Correction
+# ==============================================================================
+#
+chdir($dir_corr);
+
+$cmd  = "cd $dir_corr && ";
+$cmd .= "$CORRECT Split $opt_q $opt_p $opt_b";
+
+system($cmd);
+#
+# ==============================================================================
+
+
+# Clear
+# ==============================================================================
+#
+chdir($dir_corr);
+
+$cmd  = "cd $dir_corr\n";
+$cmd .= "mv Split/correct.fa . && ";
+$cmd .= "rm -r Split $dir_data \n";
+
+system($cmd);
+#
+# ==============================================================================
+
+
+
+# check parameters
+# ==============================================================================
+#
+sub checkParam
+{
+	if ($help || @ARGV != 2) {
+        die `pod2text $0`;
+    }
+}
+#
+# ==============================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+use Qsub;
+
+
+# Get parameters
+# ==============================================================================
+# |
+die "perl $0 <input.cfg>\n" if(@ARGV==0);
+my($cfg_file) = @ARGV;
+
+# reference 
+my $ref;
+
+# pb file
+my($genome_size, $pb_lst, $filt_len);
+
+# data type
+my $is_correct = 0;
+
+# kmer
+my($kmer_file, $kmer_size);
+
+# align strategys
+my($k_size, $min_ovl, $mode, $score);
+
+# sge 
+my($queue, $project, $pro_name, $job_num);
+
+parseCfg($cfg_file);
+# |
+# ==============================================================================
+
+
+# Global Variables
+# ==============================================================================
+# |
+my $SLEEP = 300;
+# |
+# ==============================================================================
+
+
+# Software Paths
+# ==============================================================================
+# |
+my $MERGEFILE = "perl $Bin/mergeFiles.pl";
+my $CONTIG = "perl $Bin/get_scaftig.pl";
+my $ALIGN = "perl $Bin/Align.pl";
+
+my $FILTER  = "perl $Bin/filtAl_c.pl";
+my $CONVE = "perl $Bin/convert_c.pl";
+my $LINK = "perl $Bin/link_c.pl";
+
+my $CORRECT = "perl $Bin/Correct.pl";
+# |
+# ==============================================================================
+
+
+
+# 目录结构
+# ==============================================================================
+# |
+mkdir ("Data");
+mkdir ("Shell");
+mkdir ("CloseGap");
+mkdir ("Consensus");
+
+my $dir_shell = abs_path("Shell");
+my $dir_align = abs_path("Align");
+my $dir_close = abs_path("CloseGap");
+my $dir_correct = abs_path("Consensus");
+# |
+# ==============================================================================
+
+
+
+# 对数据进行过滤和重命名
+# ==============================================================================
+# |
+
+# 准备原始数据
+debug("merge pacbio files...");
+
+my $pb_data = abs_path("Data/pb.fasta");
+my $contig = abs_path("Data/contig.fasta");
+
+my $cmd = "$MERGEFILE $pb_lst $filt_len $pb_data\n";
+$cmd .= "$CONTIG $ref > $contig\n";
+
+system($cmd);
+# |
+# ==============================================================================
+
+
+# 比对
+# ==============================================================================
+# |
+debug("do alignment...");
+
+$cmd  = "$ALIGN -k $k_size ";
+$cmd .= "-g $kmer_file -u 3 " if($kmer_size == $k_size);
+$cmd .= "-s 400 -n 2 -x $min_ovl -m $mode -t 8 ";
+$cmd .= "-q $queue -p $project -b $pro_name ";
+$cmd .= "-d $dir_align $contig $pb_data\n";
+
+system($cmd);
+# |
+# ==============================================================================
+
+
+# 聚类与连接
+# ==============================================================================
+# |
+debug("closing gap...");
+
+# 转换格式
+$cmd = "cd $dir_close && ";
+$cmd .= "$FILTER $dir_align/align.al filter.al 100 $score && ";
+$cmd .= "$CONVE filter.al convert.al && ";
+
+# 连接
+my $simi = 0.001;
+$simi = 0.1 if($is_correct==1);
+$cmd .= "$LINK $contig $pb_data convert.al.best closeGap.fa $simi";
+
+# 提交任务
+my $cmd_file = "$dir_shell/CLOSEGAP.SH";
+outShell2("closegap.sh\t$cmd", $cmd_file);
+
+qsub($cmd_file, "$dir_shell", "5G", 1,
+                $queue, $project, $pro_name, 50);
+# |
+# ==============================================================================
+
+
+
+# 纠错
+# ==============================================================================
+# |
+debug("correct files...");
+
+my $input = "$dir_close/closeGap.fa";
+$cmd  = "cd $dir_correct\n";
+$cmd .= "$CORRECT -k $k_size -u 3 ";
+$cmd .= "-g $kmer_file -u 3 " if($kmer_size==$k_size);
+$cmd .= "-s 400 -n 2 -t 8 ";
+$cmd .= "-j 10 -m 2 " if($is_correct==1);
+$cmd .= "-j 1  -m 1 " if($is_correct==0);
+$cmd .= "-b $pro_name -q $queue -p $project ";
+$cmd .= "-d $dir_correct $input $pb_data ";
+
+system($cmd) if($is_correct==0);
+# |
+# ==============================================================================
+
+
+
+# 从配置参数中取得参数
+# ==============================================================================
+# |
+sub parseCfg{
+    my $cfg_file = shift;
+    my $cfg_hdl = myOpen($cfg_file);
+
+    while (<$cfg_hdl>) {
+        chomp;
+        next if(/^#/);
+        next if(!/^\[/);
+        my($key, @values) = split;
+
+        # contig
+        $ref = $values[0] if($key eq "[reference]");
+
+        # pb file
+        $pb_lst = $values[0] if($key eq "[pb_lst]");
+        $filt_len = $values[0] if($key eq "[filt_len]");
+        $genome_size = $values[0] if($key eq "[genome_size]");
+
+        # is correct 
+        $is_correct = $values[0] if($key eq "[is_correct]");
+
+        # kmer
+        ($kmer_file,$kmer_size) = @values if($key eq "[unique_kmer]");
+
+        # qsub job
+        $queue = $values[0] if($key eq "[queue]");
+        $project = $values[0] if($key eq "[Project]");
+        $pro_name = $values[0] if($key eq "[pro_name]");
+        $job_num = $values[0] if($key eq "[max_job]");
+
+        # strategy
+        ($k_size, $min_ovl, $mode, $score) = @values if($key eq "[strategy]");
+
+    }
+    $ref = abs_path($ref);
+    $genome_size *= 10**6;
+    $kmer_file = abs_path($kmer_file);
+    $pb_lst = abs_path($pb_lst);
+    close $cfg_hdl;
+}
+# |
+# ==============================================================================
+
+
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN { 
+    push (@INC,"$Bin"); 
+} 
+use SeqIO;
+
+=head1 Name
+
+    Compress.pl  --The compress module for fastq(a) files
+
+=head1 Usage
+
+    perl Compress.pl <command> [arguments]
+
+    Command should be one of the following command. Arguments depend on specific command.
+
+    Command List:
+                compress  Compress reads
+                          Arguments:
+                          -i <FILE>       the file list with format like:                                          
+                                          Out_prefix read_1 read_2 
+                                          Out_prefix read_n
+
+                          -g <FILE>       the k-mer file from reads(.h5 or .bit)
+                          -k <INT>        the k-mer size
+                          -m <INT>        the min kmer num in read[3] 
+                    
+                          -t <FLOAT>      trim the reads if (occupied_kmer/unique_kmer)>=this_value[0.7]
+                          -n <INT>        thread number [8]
+
+                          -v <INT>        output the log file[0]
+                                          0: don't record the log
+                                          1: record the log
+
+                pipe  Compress reads with different insert size
+                          -i <FILE>       the file list with paired-end or mate reads                                         
+                                          read_1  500
+                                          read_2  500
+                                          read_3  1000
+                                          read_4  1000
+
+                          -g <FILE>       the k-mer file from reads(.h5 or .bit)
+                          -k <INT>        the k-mer size
+                          -m <INT>        the min kmer num in read[3] 
+                    
+                          -t <FLOAT>      trim the reads if (occupied_kmer/unique_kmer)>=this_value[0.7]
+                          -n <INT>        thread number [8]
+
+                          -d <INT>        need to compress[1]
+                                          1: need to compress
+                                          0: out put all reads 
+
+=head1 Example
+
+ Compress data:
+    perl Compress.pl compress -i file.lst -g kmer_17.h5 -k 17 -m 3 -t 0.7 -n 16
+
+=cut
+
+
+my($command) = @ARGV;
+
+my( 
+    $opt_i, $opt_w, $opt_j,
+    $opt_g, $opt_k, $opt_m,
+    $opt_t, $opt_n, $opt_d,
+    $opt_v, $help 
+);	
+
+# Get parameters
+# ==================================================================================================
+# |
+$opt_t = 0.7;
+$opt_m = 3;
+$opt_n = 8;
+$opt_w = 500;
+$opt_j = -1;
+$opt_d = 1;
+$opt_v = 0;
+
+GetOptions(
+    "i:s"     => \$opt_i,
+    "w:i"     => \$opt_w,
+    "j:i"     => \$opt_j,
+    "d:i"     => \$opt_d,
+    "g:s"     => \$opt_g,
+    "k:i"     => \$opt_k,
+    "m:i"     => \$opt_m,
+    "t:f"     => \$opt_t,
+    "n:i"     => \$opt_n,
+    "v:i"     => \$opt_v,
+    "help|h"  => \$help,
+);
+
+checkParam();
+$opt_g = abs_path($opt_g);
+# |
+# ==================================================================================================
+
+
+# Software path
+# ==================================================================================================
+# |
+my $MERGE = "perl $Bin/mergeFile.pl ";
+my $SPLIT = "perl $Bin/splitFA.pl ";
+my $CMP = "$Bin/compress";
+# |
+# ==================================================================================================
+
+my $cmd = "source $Bin/source.sh\n";
+
+
+# compress data
+# ==================================================================================================
+# |
+if($command eq "compress")
+{
+    $cmd .= "$MERGE $opt_i ";
+    $cmd .= "| $CMP -g $opt_g -k $opt_k  -i /dev/stdin -o /dev/stdout ";
+    $cmd .= "-m $opt_m -t $opt_n -c $opt_t -v $opt_v -d $opt_d ";
+    $cmd .= "| $SPLIT /dev/stdin\n";
+
+    debug($cmd);
+    system($cmd);
+}
+# |
+# ==================================================================================================
+
+# compress data with each insert size
+# ==================================================================================================
+# |
+if($command eq "pipe")
+{
+	# record insert size with related reads #
+	my %insert_hash;
+  my $in_hdl = myOpen($opt_i);
+  while (my $read1 = <$in_hdl>) 
+  {
+    my $read2 = <$in_hdl>;
+    chomp $read1;
+    chomp $read2;
+    my($fq1, $insert1) = split(/\s+/, $read1);
+    my($fq2, $insert2) = split(/\s+/, $read2);
+
+    $insert_hash{$insert1} .= "$fq1 $fq2\n";
+  }
+  close $in_hdl;
+
+  my $qsub_sh = "qsub.sh";
+  my $lib_lst = "sample.info";
+  outShell2("", $qsub_sh);
+  outShell2("", $lib_lst);
+
+  # generate script for each insert size #
+  while (my($insert, $reads) = each %insert_hash) 
+  {
+    my $dir = "lib_$insert";
+    mkdir $dir;
+    # file list #
+    my @array = split(/\n/, $reads);
+    open FO,">$dir/file.lst";
+    foreach(@array){
+    		my($fq1, $fq2) = split;
+    		$fq1 = abs_path($fq1);
+    		$fq2 = abs_path($fq2);
+    		print FO "$dir\t$fq1\t$fq2\n";
+    }
+    close FO;
+ 		
+   	# compress shell #
+  	$dir = abs_path($dir);
+
+  	my $cmd = "cd $dir && ";
+    $cmd .= "source $Bin/source.sh && ";
+    $cmd .= "perl $0 compress -i file.lst -g $opt_g -k $opt_k -m $opt_m -t $opt_t -n $opt_n -d $opt_d ";
+    $cmd .= "&& echo done";
+    outShell2($cmd, "$dir/lib_$insert.sh");
+
+    # qsub shell #
+    my $qsub = "qsub -cwd -l vf=10G,p=$opt_n -q all.q -S /bin/bash $dir/lib_$insert.sh";
+    outShell2($qsub, $qsub_sh, 1);
+
+    # output file #
+    outShell2("lib_$insert $dir/lib_$insert.1.fasta.gz $dir/lib_$insert.2.fasta.gz $insert", $lib_lst, 1);
+  }
+}
+# |
+# ==================================================================================================
+
+
+sub checkParam{
+	if ($help || @ARGV != 1) {
+    die `pod2text $0`;
+  }
+}
+
+use strict;
+use warnings;
+
+die "perl $0 <filt.al> <out.al>\n" if(@ARGV==0);
+
+my($infile, $outfile) = @ARGV;
+
+# Convert format
+# ==============================================================================
+# |
+my @array = ();
+open FI, $infile or die $!;
+open FO,">$outfile" or die $!;
+my($pre_pb, $pre_scf) = ("","");
+while (<FI>)
+{
+	chomp;
+	my($q_id, $t_id, $q_len, $t_len, $strand, 
+					$ovl, $q_pos, $t_pos, $block, $scf_id, $idx) = split;
+
+	if($q_id ne $pre_pb or $scf_id ne $pre_scf)
+	{
+		parseLink();
+	}
+
+	push(@array, $_);
+
+	$pre_pb = $q_id;
+	$pre_scf = $scf_id;
+}
+parseLink();
+close FI;
+close FO;
+`sort -k 1,1 -k 2,2n -k 3,3n -k 9,9n -S 3G -o $outfile $outfile`;
+# |
+# ==============================================================================
+
+
+# Get the best linkage
+# ==============================================================================
+# |
+$pre_scf = "";
+my($pre_idx1, $pre_idx2) = (-1, -1);
+open FI, "$outfile" or die $!;
+open FO, ">$outfile.best" or die $!;
+while (<FI>)
+{
+	chomp;
+	my($scf_id, $index1, $index2, $others) = split;
+
+	if($scf_id ne $pre_scf or 
+		$index1 ne $pre_idx1 or 
+		$index2 ne $pre_idx2)
+	{
+		getBest();
+	}
+
+	push(@array, $_);
+
+	$pre_scf = $scf_id;
+	$pre_idx1 = $index1;
+	$pre_idx2 = $index2;
+}
+getBest();
+close FI;
+close FO;
+# |
+# ==============================================================================
+
+
+
+# Convert format
+# ==============================================================================
+# |
+sub parseLink
+{
+	if(@array<2)
+	{
+		@array = ();
+		return;
+	}
+
+	for(my $i=0; $i<@array; $i++)
+	{
+		my($q_id, $t_id, $q_len, $t_len, $strand, $ovl,
+			$q_pos, $t_pos, $block, $scf_id, $index) = split(/\s+/, $array[$i]);
+
+		$t_id =~ /(\S+)_(\d+)\|start=(\d+)\|length=(\d+)/;
+		my($start, $len) = ($3, $4);
+		
+		# 进行连接
+		for(my $j=$i+1; $j<@array; $j++)
+		{
+			my($q_id2, $t_id2, $q_len2, 
+				$t_len2, $strand2, $ovl2,
+				$q_pos2, $t_pos2, $block2, 
+				$scf_id2, $index2) = split(/\s+/, $array[$j]);;
+
+			next if($t_id eq $t_id2);
+			next if($strand ne $strand2);
+
+			# gap observed by scaffold
+			$t_id2 =~ /(\S+)_(\d+)\|start=(\d+)\|length=(\d+)/;
+			my($start2, $len2) = ($3, $4);
+			my $gap_scf = $start2-$start-$len;
+
+			# gap observed by pb
+			#        t_pos1          t_pos2
+			# --------|-----        --|----------
+			#      ---|---------------|---
+			#        q_pos1          q_pos2
+			my $tail1 = $t_len-$t_pos;
+			my $head1 = $t_pos2;
+			my $gap_pb = $q_pos2-$q_pos-$head1-$tail1;
+			next if($gap_pb<-1000);
+
+			die "$array[$i]\n$array[$j]\n" if($scf_id ne $scf_id2);
+
+			print FO "$scf_id\t$index\t$index2\t";
+			print FO "$q_id\t$t_id\t$t_id2\t$strand\t$gap_scf\t$gap_pb\t";
+			print FO "$q_pos,$t_pos\t$q_pos2,$t_pos2\t$q_len\t$t_len\t$t_len2\n";
+		}
+	}
+	@array=();
+}
+# |
+# ==============================================================================
+
+
+sub getBest{
+	return if(@array==0);
+	my $mid = int(@array/2);
+	print FO "$array[$mid]\n";
+	@array = ();
+}
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use Qsub;
+use SeqIO;
+
+=head1 Name
+
+    Correct.pl  --Correct genome.fa with other.fa
+
+=head1 Usage
+
+    perl Correct.pl [arguments] <genome.fa> <other.fa>
+
+    Argument List:
+                  -c <INT>        the software to do correction[1]
+                                  1. PBDAGCON
+                                  2. PROREAD, only suitable for illumina contig
+
+                  -g <FILE>       the unique kmer(.h5 or .bit)
+                  -k <INT>        the kmer size of the unique graph[17]
+                  -u <INT>        the min unique kmer[3]
+
+                  -s <INT>        split the reference file, in unit of M[100].
+                  -s2<INT>        split the query file, in unit of M[-1,all_data].
+
+                  -x <INT>        the scope to align[-1]
+                  -j <INT>        the jump length to get kmer[1]
+                  -n <INT>        max align number for query [2]
+
+                  -t <INT>        thread number[4]
+                  -m <INT>        align mode[1]
+                                  1. align with LCS,for uncrrected reads
+                                  2. align with kmer, for corrected reads
+
+                  -d <DIR>        the output directory [Consensus]
+
+                  -b <STR>        the pro_name [pb_cor]
+                  -q <STR>        the queue of sge [dna.q,rna.q,reseq.q]
+                  -p <STR>        the project of sge [og]
+
+
+=head1 Example
+
+perl Correct.pl -g k17.bit -k 17 -u 3 -n 10 ref.fa query.fa
+
+=cut
+
+my(
+$opt_g, $opt_k, $opt_u,   # kmer
+$opt_s, $opt_s2,          # split size
+$opt_j, $opt_n, $opt_x,   # scope
+$opt_t, $opt_m,           # speed
+$opt_c, $opt_d,           # output
+$opt_b, $opt_q, $opt_p,   # qsub
+$help
+);
+
+# Get parameters
+# ==============================================================================
+# |
+GetOptions(
+"g:s"     => \$opt_g,
+"k:i"     => \$opt_k,
+"u:i"     => \$opt_u,
+
+"s:i"     => \$opt_s,
+"s2:i"    => \$opt_s2,
+
+"x:i"     => \$opt_x,
+"j:i"     => \$opt_j,
+"n:i"     => \$opt_n,
+
+"t:i"     => \$opt_t,
+"m:i"     => \$opt_m,
+
+"c:i"     => \$opt_c,
+"d:s"     => \$opt_d,
+
+"b:s"     => \$opt_b,
+"q:s"     => \$opt_q,
+"p:s"     => \$opt_p,
+
+"help|h"  => \$help,
+);
+
+my($ref, $query) = @ARGV;
+
+checkParam();
+
+$opt_g ||= -1;
+$opt_k ||= 17;
+
+$opt_g = abs_path($opt_g);
+$opt_u ||= 3;
+$opt_x ||= -1;
+
+$opt_s ||= 100;
+$opt_s2 ||= -1;
+
+$opt_j ||= 1;
+$opt_n ||= 2;
+$opt_t ||= 4;
+$opt_m ||= 1;
+
+$opt_c ||= 1;
+$opt_d ||= "Consensus";
+
+$opt_b ||= "pb_cor";
+$opt_q ||= "all.q";
+$opt_p ||= "wrbio";
+
+$ref   = abs_path($ref);
+$query = abs_path($query);
+$opt_d = abs_path($opt_d);
+# |
+# ==============================================================================
+
+
+# Software path
+# ==============================================================================
+# |
+my $CUTFA = "perl $Bin/cutFa.pl";
+my $ALIGN = "perl $Bin/Align.pl";
+
+my $CONVERT = "perl $Bin/al2bb.pl";
+my $PBSPLIT = "perl $Bin/pbsplit.pl";
+
+my $PBDAGCON  = "perl $Bin/pbdagcon.pl";
+my $PROOVREAD = "perl $Bin/proovread.pl";
+# |
+# ==============================================================================
+
+
+# Direcotory
+# ==============================================================================
+#
+my $dir_data  = "$opt_d/Data";
+my $dir_align = "$opt_d/Align";
+my $dir_corr  = "$opt_d/Result";
+
+mkdir "$opt_d";
+mkdir "$dir_data";
+mkdir "$dir_corr";
+
+chdir ($opt_d);
+my $pwd = getcwd();
+# |
+# ==============================================================================
+
+# Cut other.fa with length of 20k
+# ==============================================================================
+#
+my $cmd = "$CUTFA $query $dir_data/other.fa";
+system($cmd);
+$query = "$dir_data/other.fa";
+# |
+# ==============================================================================
+
+
+
+# Do alignment
+# ==============================================================================
+#
+$cmd = "$ALIGN -g $opt_g -k $opt_k -u $opt_u -s $opt_s -s2 $opt_s2 ";
+$cmd .= "-x $opt_x -j $opt_j -n $opt_n -t $opt_t -m $opt_m -d $dir_align ";
+$cmd .= "-b $opt_b -p $opt_p -q $opt_q ";
+$cmd .= "$ref $query";
+debug($cmd);
+system($cmd);
+# |
+# ==============================================================================
+
+
+
+# Split sequences into small files
+# ==============================================================================
+#
+chdir($dir_corr);
+
+$cmd  = "cd $dir_corr && ";
+$cmd .= "$CONVERT  $dir_align/align.al backbone.lst && ";
+$cmd .= "$PBSPLIT -a $ref -b $query -l backbone.lst -d Split";
+
+my $cmd_file = "PREPARE.sh";
+outShell2("prepare.sh\t$cmd", $cmd_file);
+
+qsub($cmd_file, "$dir_corr/Shell", "5G", 1,
+            $opt_q, $opt_p, $opt_b, 50);
+#
+# ==============================================================================
+
+
+
+# Do consensus
+# ==============================================================================
+#
+chdir("$dir_corr/Shell");
+
+my $list = `ls $dir_corr/Split/*/*.subreads.fasta`;
+my @files = split(/\n/, $list);
+my @shell_cors;
+
+# generate correct shells #
+$cmd = "";
+my $index = 0;
+foreach my $read (@files)
+{
+    my $sub_ref = $read;
+    $sub_ref =~ s/\.subreads//;
+
+    my $dir = dirname($read);
+    $cmd .= "cd $dir\n";
+    $cmd .= "$PBDAGCON  $sub_ref $read $opt_t 1\n" if($opt_c==1);
+    $cmd .= "$PROOVREAD $sub_ref $read $opt_t\n" if($opt_c==2);
+
+    $index++;
+    outCor()  if($index%20==0);
+}
+outCor();
+
+# generate config file #
+open FO, ">Correct.cfg" or die $!;
+foreach my $shell(@shell_cors){
+    print FO "$shell:5G\n";
+}
+close FO;
+
+# qsub jobs
+qsub2("Correct.cfg", $opt_t, $opt_q, $opt_p, $opt_b, 50);
+
+# cat files
+$cmd  = "cd $dir_corr\n";
+$cmd .= "cat $dir_corr/Split/*/*.consensus > correct.fa && ";
+$cmd .= "rm -r $dir_data && ";
+$cmd .= "rm -r $dir_corr/Split";
+system($cmd);
+
+sub outCor
+{
+    return if($cmd eq "");
+    my $index2 = int($index/20);
+    my $shell = abs_path("pbdagcon_$index2.sh");
+
+    $cmd .= "echo done";
+    outShell2($cmd, $shell);
+    push(@shell_cors, $shell);
+
+    $cmd = "";
+}
+#|
+#
+# ==============================================================================
+
+
+
+# check parameters
+# ==============================================================================
+#
+sub checkParam
+{
+	if ($help || @ARGV != 2) {
+        die `pod2text $0`;
+    }
+}
+#
+# ==============================================================================
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <ref.fasta> <out.fasta> <len:20000> <ovl:1000>\n" if(@ARGV==0);
+
+my($infile, $outfile, $max_len, $ovl) = @ARGV;
+
+my($id, $seq);
+$max_len ||= 20000;
+$ovl ||= 1000;
+
+my $in_hdl = myOpen($infile);
+my $ou_hdl = myOpen(">$outfile");
+while (getSeq($in_hdl,\$id,\$seq)!=-1)
+{
+	my $len = length($seq);
+	for(my $i=0; $i<$len; $i+=$max_len-$ovl)
+	{
+		my $sub_seq = substr($seq,$i,$max_len);
+
+		my $new_id = "${id}:$i";
+		print $ou_hdl ">$new_id\n";
+        formatSeq($sub_seq);
+	}
+}
+close $in_hdl;
+close $ou_hdl;
+
+sub formatSeq{
+    my $seq = shift;
+    my $len = length($seq);
+    my $sub_len = 80;
+    for(my $i=0; $i<$len; $i+=$sub_len)
+    {
+        my $sub_seq = substr($seq, $i, $sub_len);
+        print $ou_hdl "$sub_seq\n";
+    }
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <in.fasta> <out.fasta> <cut_len:20000>\n" if(@ARGV==0);
+
+my($infile, $outfile, $cut_len) = @ARGV;
+$cut_len ||= 20000;
+
+my $in_hdl  = myOpen($infile);
+my $out_hdl = myOpen(">$outfile");
+
+my ($id,$seq);
+while (getSeq($in_hdl,\$id,\$seq)!=-1) 
+{
+	my $len = length($seq);
+	if($len<=$cut_len || $cut_len<=0)
+	{
+		print $out_hdl ">$id\n$seq\n";
+		next;
+	}
+	for(my $i=0;$i<$len;$i+=$cut_len)
+	{
+		my $sub_seq = substr($seq,$i,$cut_len);
+		print $out_hdl ">${id}_$i\n$sub_seq\n";
+	}
+	
+}
+close $in_hdl;
+close $out_hdl;
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+
+# Get parameters
+# ==================================================================================================
+# |
+die "perl $0 <input.cfg>\n" if(@ARGV==0);
+my($cfg_file) = @ARGV;
+
+# pb file
+my($genome_size, $pb_lst, $filt_len);
+
+# 1: uncorrected
+# 2: corrected
+my $data_type;
+
+# kmer
+my($kmer_file, $kmer_size);
+
+# sge 
+my($queue, $project, $pro_name, $job_num);
+
+# assembly strategys
+my @strategys;
+
+# thread
+my $thread = 8;
+
+parseCfg($cfg_file);
+# |
+# ==================================================================================================
+
+
+# Global Variables
+# ==================================================================================================
+# |
+my $SLEEP = 300;
+# |
+# ==================================================================================================
+
+
+# Software Paths
+# ==================================================================================================
+# |
+my $MERGEFQ = "perl $Bin/mergeFA.pl";
+my $CMPR = "perl $Bin/../Compress/Compress.pl";
+my $ALIGN = "perl $Bin/../Align/Align.pl";
+
+my $FILTER  = "perl $Bin/filtAl.pl";
+my $GRAPH   = "perl $Bin/buildGraph.pl";
+my $LINK    = "perl $Bin/link.pl";
+
+my $SORT_FILE = "perl $Bin/sortSeq.pl";
+
+my $STAT = "$Bin/monitor stat ";
+my $QSUB = "$Bin/monitor taskmonitor ";
+my $UPDATE = "$Bin/monitor updateproject -p ";
+my $RMPRO = "$Bin/monitor removeproject -p ";
+my $CLEAN = "$Bin/monitor removeproject -d";
+# |
+# ==================================================================================================
+
+
+# 对数据进行过滤和重命名
+# ==================================================================================================
+# |
+mkdir ("Data");
+mkdir ("Shell");
+
+my $pb_data = abs_path("Data/data.fasta");
+
+# 重命名
+my $cmd = "$MERGEFQ $pb_lst $filt_len $pb_data \n";
+system($cmd);
+# |
+# ==================================================================================================
+
+
+my $index = -1;
+@strategys = ($strategys[0], @strategys);
+foreach(@strategys){
+    print STDERR "$_\n";
+
+    $index++;
+    mkdir "Process_$index";
+    chdir "Process_$index";
+    
+    # 目录结构
+    # ==================================================================================================
+    # |
+    mkdir("Shell");
+    mkdir("Assembly");
+    
+    my $dir_shell = abs_path("Shell");
+    my $dir_align = abs_path("Align");
+    my $dir_assem = abs_path("Assembly");
+    # |
+    # ==================================================================================================
+ 
+
+    my($k_size, $min_ovl, $mode, $score, $min_len, $jump) = split;
+    $min_len ||= 500;
+    $jump ||= 1;
+    
+    # 对序列来比对
+    # ==================================================================================================
+    # |
+    my $divide_size = int($genome_size/10**6)+1;
+    $divide_size=400 if($divide_size>400);
+
+    my $max_num = 3;	# 第一次，尽量节约时间
+    $max_num = 10 if($index==1);
+    $max_num = 5 if($index>1);
+
+    $cmd  = "$ALIGN -k $k_size  -s $divide_size ";
+    $cmd .= "-g $kmer_file -u 3 " if($k_size==$kmer_size);
+    $cmd .= "-j 10 " if($mode==2);
+    $cmd .= "-j $jump " if($mode==1);
+    $cmd .= "-t $thread ";
+    $cmd .= "-n $max_num ";
+    $cmd .= "-s2 -1 -x $min_ovl -m $mode -d $dir_align $pb_data $pb_data\n";
+    print STDERR "$cmd\n";
+    system($cmd);
+    # |
+    # ==================================================================================================
+
+
+    # 投递任务
+    # ==================================================================================================
+    # |
+    qsubJobs("$dir_align/align.cfg");
+    while (checkJobs($pro_name)==0) {
+        sleep($SLEEP);
+    }
+    # |
+    # ==================================================================================================
+
+
+    # 数据聚类和组装
+    # ==================================================================================================
+    # |
+    my $simi = 0.5;
+    $simi = 0 if($data_type==1);
+
+    $cmd  = "cd $dir_assem\n";
+    $cmd .= "$FILTER $dir_align/align.al filter.al $min_len $score \n";
+    $cmd .= "$GRAPH filter.al graph.info\n";
+    $cmd .= "$LINK $pb_data short.lst graph.info assemble.fasta $simi && echo done\n";
+    
+    my $shell_denovo = "$dir_shell/denovo.sh";
+    outShell($cmd, $shell_denovo);
+    outShell("$shell_denovo:10G", "$dir_assem/config.txt");
+
+    qsubJobs("$dir_assem/config.txt");
+    while (checkJobs($pro_name)==0) {
+        sleep($SLEEP);
+    }
+    # |
+    # ==================================================================================================
+    $pb_data = abs_path("$dir_assem/assemble.fasta");
+    chdir("..");
+}
+
+# 对数据进行压缩
+# ==================================================================================================
+# |
+mkdir "Compress";
+chdir("Compress");
+
+outShell("final $pb_data", "file.lst");
+
+die "don't exists kmer file in compress.." if(!-e $kmer_file); 
+
+my $cmp_dir = abs_path("./");
+$cmd  = "cd $cmp_dir\n";
+$cmd .= "$SORT_FILE $pb_data $pb_data 5\n";
+$cmd .= "$CMPR compress -i file.lst  -m 3 -t 0.5 -n 1 -v 1 ";
+$cmd .= "-g $kmer_file " if(-e $kmer_file);
+$cmd .= "-k $kmer_size \n";
+$cmd .= "echo done";
+
+my $cmpr_sh = "$cmp_dir/compress.sh";
+
+outShell($cmd, $cmpr_sh);
+outShell("$cmpr_sh:5G","$cmp_dir/config.txt");
+qsubJobs("$cmp_dir/config.txt");
+# |
+# ==================================================================================================
+
+
+debug("Finish assembly");
+
+# 从配置参数中取得参数
+# ==================================================================================================
+# |
+sub parseCfg{
+    my $cfg_file = shift;
+    my $cfg_hdl = myOpen($cfg_file);
+
+    while (<$cfg_hdl>) {
+        chomp;
+        next if(/^#/);
+        next if(!/^\[/);
+        my($key, @values) = split;
+        # pb file
+        $pb_lst = $values[0] if($key eq "[pb_lst]");
+        $filt_len = $values[0] if($key eq "[filt_len]");
+        $genome_size = $values[0] if($key eq "[genome_size]");
+        $data_type = $values[0] if($key eq "[pb_type]");
+        # kmer
+        ($kmer_file,$kmer_size) = @values if($key eq "[unique_kmer]");
+        # qsub job
+        $queue = $values[0] if($key eq "[queue]");
+        $project = $values[0] if($key eq "[Project]");
+        $pro_name = $values[0] if($key eq "[pro_name]");
+        $job_num = $values[0] if($key eq "[max_job]");
+        # strategy
+        push(@strategys, "@values") if($key eq "[strategy]");
+        # thread
+        $thread = $values[0] if($key eq "[thread]");
+    }
+    $genome_size *= 10**6;
+    $kmer_file = abs_path($kmer_file);
+    $pb_lst = abs_path($pb_lst);
+    $data_type ||= 2;
+    close $cfg_hdl;
+}
+# |
+# ==================================================================================================
+
+
+# 输出SHELL文件
+# ==================================================================================================
+# |
+sub outShell{
+  my($cmd, $outfile) = @_;
+  open FO_,">$outfile" or die $!;
+  print FO_ "$cmd";
+  close FO_;
+}
+# |
+# ==================================================================================================
+
+
+# 提交任务
+# ==================================================================================================
+# |
+sub qsubJobs{
+    my $cfg_file = shift;
+    my $info = "";
+    
+    my $cmd  = "$CLEAN\n";
+    $cmd .= "$QSUB -i $cfg_file -p $pro_name -q $queue -P $project ";
+    $cmd .= "-f 3 -s done -n $job_num -t $thread";
+
+    $info = system($cmd);
+}
+# |
+# ==================================================================================================
+
+
+# 检查任务
+# ==================================================================================================
+# |
+sub checkJobs{
+    my($name) = @_;
+
+    `$UPDATE $name`;
+    my $lines = `$STAT -p $name`;
+    my @info = split(/\n/, $lines);
+    
+    return 0 if(@info!=2);
+    my @array = split(/\s+/, $info[1]);
+    return 0 if(@array<7);
+    
+    my($done, $total) = @array[7,9];
+    return 0 if($done !~ /^\d+/);    
+   
+    if($done == $total)
+    {
+        `$RMPRO $name`;
+        return 1 ;
+    }
+
+    return 0;
+}
+# |
+# ==================================================================================================
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+use Qsub;
+
+
+# Get parameters
+# ==============================================================================
+# |
+die "perl $0 <input.cfg>\n" if(@ARGV==0);
+my($cfg_file) = @ARGV;
+
+# pb file
+my($genome_size, $pb_lst, $filt_len);
+
+# 1: uncorrected
+# 2: corrected
+my $data_type;
+
+# kmer
+my($kmer_file, $kmer_size);
+
+# sge
+my($queue, $project, $pro_name, $job_num);
+
+# assembly strategys
+my @strategys;
+
+# thread
+my $thread = 8;
+
+parseCfg($cfg_file);
+
+my $pwd = getcwd();
+# |
+# ==============================================================================
+
+
+# Software Paths
+# ==============================================================================
+# |
+# prepare data
+my $MERGE = "perl $Bin/mergeFA.pl";
+
+# link
+my $ALIGN = "perl $Bin/Align.pl";
+my $FILTER  = "perl $Bin/filtAl.pl";
+my $GRAPH   = "perl $Bin/buildGraph.pl";
+my $LINK    = "perl $Bin/link.pl";
+
+# compress
+my $CMPR  = "perl  $Bin/Compress.pl";
+my $SORT_FILE = "perl $Bin/sortSeq.pl";
+# |
+# ==============================================================================
+
+
+# 对数据进行过滤和重命名
+# ==============================================================================
+# |
+mkdir ("Data");
+mkdir ("Shell");
+
+my $pb_data = abs_path("Data/data.fasta");
+
+# 重命名
+my $cmd = "$MERGE $pb_lst $filt_len $pb_data \n";
+system($cmd);
+# |
+# ==============================================================================
+
+
+
+# 事先对数据进行压缩
+# ==============================================================================
+# |
+mkdir "Compress0";
+chdir("Compress0");
+
+outShell2("final $pb_data", "file.lst");
+
+exit(0) if(!-e $kmer_file);
+
+my $cmp_dir = getcwd();
+
+$cmd  = "cd $cmp_dir && ";
+$cmd .= "$SORT_FILE $pb_data $pb_data 5 && ";
+$cmd .= "$CMPR compress -i file.lst  -m 3 -t 0.9 -n 1 -v 1 ";
+$cmd .= "-g $kmer_file " if(-e $kmer_file);
+$cmd .= "-k $kmer_size && ";
+$cmd .= "echo done";
+
+my $cmd_file = "$cmp_dir/COMPRESS.sh";
+outShell2("compress.sh\t$cmd", $cmd_file);
+qsub($cmd_file, $cmp_dir, "10G", 1,
+                $queue, $project, $pro_name, 50);
+
+`gzip -d $pwd/Compress0/final.single.fasta.gz`;
+$pb_data = "$pwd/Compress0/final.single.fasta";
+chdir($pwd);
+# |
+# ==============================================================================
+
+
+
+# 核心组装过程
+# ==============================================================================
+# |
+my $index = 0;
+foreach(@strategys)
+{
+    debug($_);
+
+    # 比对参数设置
+    # ==========================================================================
+    # |
+    my($k_size, $min_ovl, $mode, $score, $min_len, $jump) = split;
+    $min_len ||= 500;
+    $jump ||= 10;
+    $jump = 10 if($jump==1 && $mode==2);
+    # |
+    # ==========================================================================
+
+
+    # 目录结构
+    # ==========================================================================
+    # |
+    $index++;
+    mkdir "Process_$index";
+    chdir "Process_$index";
+
+    mkdir("Align");
+    mkdir("Assembly");
+
+    my $dir_align = abs_path("Align");
+    my $dir_assem = abs_path("Assembly");
+    # |
+    # ==========================================================================
+
+
+    # 对序列进行比对
+    # ==========================================================================
+    # |
+    my $divide_size = int($genome_size/10**6)+1;
+    $divide_size=400 if($divide_size>400);
+
+    my $max_num = 10;
+    $max_num = 3 if($index>1);
+
+    $cmd  = "$ALIGN -k $k_size  -s $divide_size ";
+    $cmd .= "-g $kmer_file -u 1 " if($k_size==$kmer_size);
+    $cmd .= "-j $jump ";
+    $cmd .= "-t $thread ";
+    $cmd .= "-n $max_num ";
+    $cmd .= "-s2 -1 -x $min_ovl -m $mode -d $dir_align $pb_data $pb_data\n";
+
+    system($cmd);
+    # |
+    # ==========================================================================
+
+
+    # 数据聚类
+    # ==========================================================================
+    # |
+    my $simi = 0.5;
+    $simi = 0 if($data_type==1);
+
+    $cmd  = "cd $dir_assem && ";
+    $cmd .= "$FILTER $dir_align/align.al filter.al $min_len $score && ";
+    $cmd .= "$GRAPH filter.al graph.info && ";
+    $cmd .= "$LINK $pb_data short.lst graph.info assemble.fasta $simi ";
+    $cmd .= " && echo done\n";
+
+    my $cmd_file = "$dir_assem/DENOVO.sh";
+    outShell2("denovo.sh\t$cmd", $cmd_file);
+    qsub($cmd_file, $dir_assem, "10G", 1,
+                    $queue, $project, $pro_name, 50);
+    # |
+    # ==========================================================================
+    $pb_data = abs_path("$dir_assem/assemble.fasta");
+    chdir("..");
+}
+# |
+# ==============================================================================
+
+
+
+# 对数据进行压缩
+# ==============================================================================
+# |
+mkdir "Compress";
+chdir("Compress");
+
+outShell2("final $pb_data", "file.lst");
+
+return if(!-e $kmer_file);
+
+my $cmp_dir = abs_path("./");
+
+$cmd  = "cd $cmp_dir && ";
+$cmd .= "$SORT_FILE $pb_data $pb_data 5 && ";
+$cmd .= "$CMPR compress -i file.lst  -m 3 -t 0.3 -n 1 -v 1 ";
+$cmd .= "-g $kmer_file " if(-e $kmer_file);
+$cmd .= "-k $kmer_size && ";
+$cmd .= "echo done";
+
+my $cmd_file = "$cmp_dir/COMPRESS.sh";
+outShell2("compress.sh\t$cmd", $cmd_file);
+qsub($cmd_file, $cmp_dir, "10G", 1,
+                $queue, $project, $pro_name, 50);
+# |
+# ==============================================================================
+
+
+# 从配置参数中取得参数
+# ==============================================================================
+# |
+sub parseCfg{
+    my $cfg_file = shift;
+    my $cfg_hdl = myOpen($cfg_file);
+
+    while (<$cfg_hdl>) {
+        chomp;
+        next if(/^#/);
+        next if(!/^\[/);
+        my($key, @values) = split;
+        # pb file
+        $pb_lst = $values[0] if($key eq "[pb_lst]");
+        $filt_len = $values[0] if($key eq "[filt_len]");
+        $genome_size = $values[0] if($key eq "[genome_size]");
+        $data_type = $values[0] if($key eq "[pb_type]");
+        # kmer
+        ($kmer_file,$kmer_size) = @values if($key eq "[unique_kmer]");
+        # qsub job
+        $queue = $values[0] if($key eq "[queue]");
+        $project = $values[0] if($key eq "[Project]");
+        $pro_name = $values[0] if($key eq "[pro_name]");
+        $job_num = $values[0] if($key eq "[max_job]");
+        # strategy
+        push(@strategys, "@values") if($key eq "[strategy]");
+        # thread
+        $thread = $values[0] if($key eq "[thread]");
+    }
+    $genome_size *= 10**6;
+    $kmer_file = abs_path($kmer_file);
+    $pb_lst = abs_path($pb_lst);
+    $data_type ||= 2;
+    close $cfg_hdl;
+}
+# |
+# ==============================================================================
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN { 
+    push (@INC,"$Bin"); 
+} 
+use SeqIO;
+
+die "perl $0 <kmer.dump> <min_occ> <max_occ>" if(@ARGV!=3);
+
+my($kmer_file,$min_occ,$max_occ) = @ARGV;
+$max_occ ||= 0;
+
+my $in_hdl = myOpen($kmer_file);
+my $index = 1;
+while (<$in_hdl>) {
+	chomp;
+	my($kmer,$freq) = split;
+    next if(!defined $freq);
+	next if($freq<$min_occ);
+	my $kmer_r = revCom($kmer);
+
+	if($max_occ<=0){
+		print ">read_$index\n$kmer\n";
+		print ">read_$index\n$kmer_r\n";
+	}else{
+		print ">read_$index\n$kmer\n" if($freq<=$max_occ);
+		print ">read_$index\n$kmer_r\n" if($freq<=$max_occ);
+	}
+	$index++;
+}
+close $in_hdl;
+use strict;
+use warnings;
+
+die "perl $0 <test.al>\n" if(@ARGV==0);
+
+my($align) = @ARGV;
+
+
+open FI, $align or die $!;
+open FO, ">temp.al";
+while(<FI>){
+    chomp;
+    my($ctg, $chr, $ctg_len, $chr_len,
+        $strand, $ovl, $match, $block,
+        $q_pos, $t_pos, $uni_kmer) = split;
+
+    next if($match<0.9);
+
+    my($id, $start, $len) = split(/\|/, $ctg);
+    $id =~ /(\w+)_(\d+)$/;
+    my($scf, $idx) = ($1, $2);
+
+    print FO "$scf\t$idx\t$chr\t$t_pos\n";
+}
+close FI;
+close FO;
+
+`sort -k 1,1 -k 2,2n -o temp.al temp.al`;
+
+open FI, "temp.al";
+open FO, ">temp2.al";
+my($pre_scf, $pre_idx, $pre_chr, $pre_pos);
+while (<FI>) {
+    chomp;
+    my $stat = 1;
+    my($scf, $idx, $chr, $t_pos) = split;
+    if(defined $pre_scf)
+    {
+        if($scf eq $pre_scf)
+        {
+            my $dist1 = $idx-$pre_idx;
+            my $dist2 = $t_pos-$pre_pos;
+
+            if($pre_chr ne $chr){
+                $stat = -1;
+            }
+        }
+    }
+    print FO "$_\t$stat\n";
+
+    ($pre_scf, $pre_idx, $pre_chr, $pre_pos) = ($scf, $idx, $chr, $t_pos);
+}
+close FI;
+close FO;
+use strict;
+use warnings;
+
+die "perl $0 <test.al>\n" if(@ARGV==0);
+
+my($align) = @ARGV;
+
+my $total = 0;
+my $match = 0;
+open FI, $align or die $!;
+while(<FI>){
+    chomp;
+    my($id1, $id2) = (split)[0,1];
+    
+    my($s1, $idx1) = split(/_/,$id1);
+    my($s2, $idx2) = split(/_/,$id2);
+    
+    $total++;
+    $match++ if($s1 eq $s2);
+}
+close FI;
+
+my $perc = $match/$total;
+
+print "total: $total\nmatch: $match\npercent: $perc\n";
+use strict;
+use warnings;
+
+die "perl $0 <align.al> <outfile> <min_ovl:300> <score:0.7>\n" if(@ARGV==0);
+
+my($in_file, $out_file, $min_ovl, $score) = @ARGV;
+$min_ovl ||= 300;
+$score ||= 0.7;
+
+
+open FI, $in_file or die $!;
+open FO,">$out_file" or die $!;
+while (<FI>) {
+	chomp;
+	
+    my($q_id, $t_id, $q_len, $t_len,
+		$strand, $ovl, $match, $block,
+		$q_pos, $t_pos, $uni) = split;
+
+    next if($q_id eq $t_id);
+	next if($block<$score);
+	next if($match<$score);
+	next if($ovl<$min_ovl);
+
+	$t_id =~ /(\S+)_(\d+)\|start=(\d+)\|length=(\d+)/;
+	my($scf_id, $index) = ($1, $2); 
+
+	print FO "$q_id\t$t_id\t$q_len\t$t_len\t$strand\t$ovl\t$q_pos\t$t_pos\t$block\t$scf_id\t$index\n";
+}
+close FI;
+close FO;
+
+`sort -k 1,1 -k 10,10 -k 11,11n -S 3G -o $out_file $out_file`;
+
+use strict;
+use warnings;
+
+die "perl $0 <align.al> <outfile> <min_ovl:300> <score:0.7>\n" if(@ARGV==0);
+
+my($in_file, $out_file, $min_ovl, $score) = @ARGV;
+$min_ovl ||= 300;
+$score ||= 0.6;
+
+
+open FI, $in_file or die $!;
+open FO,">$out_file" or die $!;
+while (<FI>) {
+	chomp;
+	my($q_id, $t_id, $q_len, $t_len,
+		$strand, $ovl, $match, $block,
+		$q_pos, $t_pos, $uni) = split;
+
+    next if($q_id eq $t_id);
+	next if($block<$score);
+	next if($match<$score);
+	next if($ovl<$min_ovl);
+	
+	# 因为q_id为pacbio, 要转成t_id为pacbio的格式，方便后续处理
+	if($strand eq "-"){
+		$t_pos = $t_len-$t_pos;
+		$q_pos = $q_len-$q_pos;
+	}
+	print FO "$t_id\t$q_id\t$t_len\t$q_len\t$strand\t$ovl\t$t_pos\t$q_pos\t$block\n";
+	# print FO "$q_id\t$t_id\t$q_len\t$t_len\t$strand\t$ovl\t$q_pos\t$t_pos\t$block\n";
+}
+close FI;
+close FO;
+use strict;
+use warnings;
+
+die "perl $0 <align.al> <outfile> <min_ovl:300> <score:0.7>\n" if(@ARGV==0);
+
+my($in_file, $out_file, $min_ovl, $score) = @ARGV;
+$min_ovl ||= 300;
+$score ||= 0.7;
+
+
+open FI, $in_file or die $!;
+open FO,">$out_file" or die $!;
+while (<FI>) {
+	chomp;
+	my($q_id, $t_id, $q_len, $t_len,
+		$strand, $ovl, $match, $block,
+		$q_pos, $t_pos, $uni
+		) = split;
+
+    next if($q_id eq $t_id);
+	next if($ovl<$min_ovl);
+	next if($block<$score);
+	next if($match<$score);
+
+	print FO "$q_id\t$t_id\t$q_len\t$t_len\t$strand\t$ovl\t$q_pos\t$t_pos\t$block\n";
+}
+close FI;
+close FO;
+use strict;
+use warnings;
+
+die "perl $0 <kmer.histo> <outFile> <number of kmer_kind:from *.stats District>
+This script is used for formating the data for kmer analysis.
+example:
+perl $0 17mer.freq kmer.xls 1000000\n" if(@ARGV==0);
+
+my($file,$out,$node)= @ARGV;
+
+open FI,"$file" or die $!;
+open FO,">$out";
+my $line = 0;
+while(<FI>){
+	$line++;
+	chomp;
+	my($count,$num) = split;
+	my $percent = $num/$node;
+	print FO "$count\t$percent\t$num\n";
+	last if($line>=800);
+}
+close FI;
+close FO;
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <file.fq> <outfile>\n" if(@ARGV==0);
+
+my($fq, $outfile, $min_len) = @ARGV;
+
+my $in_hdl = myOpen($fq);
+my $ou_hdl = myOpen(">$outfile");
+while(my $id=<$in_hdl>){
+    my $seq = <$in_hdl>;
+    <$in_hdl>;
+    <$in_hdl>;
+    chomp $id;
+    chomp $seq;
+
+    $id =~ s/^@/>/;
+    print $ou_hdl "$id\n$seq\n";
+}
+close $in_hdl;
+close $ou_hdl;
+use strict;
+use warnings;
+
+die "perl $0 <kmer.xls> <k> <kmer_num> <expect_peak:default is the most high peak>\nplease see the example before you use this script\n" if(@ARGV==0);
+
+# global variables
+my $REPEAT = 1.6;
+my @kmers;
+my $size;
+my @peaks;
+my $kmer_depth;
+my $repeat;
+my $hete;
+my $read_coverage;
+my $error_rate;
+my $kmer_error;
+
+my($data,$k,$kmer_num,$manual_peak) = @ARGV;
+@peaks = getPeaks($data);
+my($c1,$p1,$n1) = &getFirstLine($data);
+
+foreach my $peak(@peaks){
+	print "\n***********************************************\n";
+	$kmer_depth = $peak;
+	$size = &sizeGuess();
+	$repeat = &repeatGuess($kmer_num,$kmer_depth,$size);
+	$hete = &heteGuess();
+	&debug();
+}
+
+$manual_peak||=$kmer_depth;
+if($manual_peak!=$kmer_depth){
+	print "\n-------------------manual set-------------------\n";
+	$kmer_depth = $manual_peak;
+	$size = &getSize1($kmer_num,$kmer_depth);
+	$repeat = &repeatGuess($kmer_num,$kmer_depth,$size);
+	$hete = &heteGuess();
+	&debug();
+}
+##########################################################################################################################################
+############################################  subroutine  ################################################################################
+##########################################################################################################################################
+sub debug{
+	print "peak:$kmer_depth\n";
+	print "genomeSize:$size\n";
+	print "repeat:$repeat\n";
+	print "hete:$hete\n";
+}
+# ���ƻ������С
+sub sizeGuess{
+	my $size = &getSize1($kmer_num,$kmer_depth);
+	return $size;
+}
+# �����ظ���
+sub repeatGuess{
+	my($kmer_total,$kmer_depth,$size)=@_;
+	my $num_unique = 0;
+	for(my $i=0;$i<$REPEAT*$kmer_depth;$i++){
+		my($count,$percent,$num) = split(/\t/,$kmers[$i]);
+		$num_unique += $count*$num;
+	}
+	my $repeat_kmer = $kmer_total - $num_unique;
+	my $repeat = ($kmer_total - $num_unique)/$kmer_depth/$size;
+	#$repeat = $repeat/0.986;
+
+	print "repeat kmer: $repeat_kmer\n";
+	return $repeat;
+}
+# �����Ӻ���
+sub heteGuess1{#ʹ�÷�ֵ���㣬���ܴ�����Ӱ�죬���Ƚϴ�
+	my $inflex = inflexion();
+	$inflex = 2 if($inflex>=0.5*$kmer_depth);
+	my $max = $REPEAT*$kmer_depth;
+	my $kmer_uni = 0;
+	for(my $i=$inflex+1;$i<$max;$i++){
+		my($count,$percent,$num) = split(/\t/,$kmers[$i]);
+		$kmer_uni += $num;
+	}
+	my($count,$percent,$num_peak) = split(/\t/,$kmers[$kmer_depth]);
+	my $kmer_org = $size*(1-$repeat); # unique kmers
+	my $possion = getPossion($kmer_depth,$kmer_depth);
+	my $result = 1-($num_peak/$kmer_org/$possion)**(1/$k);
+	return $result;
+}
+
+sub heteGuess{#ʹ��kmer�����Ĳ�ͬ�����㣬�����ԱȽ�С
+	my $inflex = inflexion();
+	$inflex = 2 if($inflex>=0.5*$kmer_depth);
+	my $max = $REPEAT*$kmer_depth;
+	my $kmer_uni = 0;
+	for(my $i=$inflex+1;$i<$max;$i++){
+		my($count,$percent,$num) = split(/\t/,$kmers[$i]);
+		$kmer_uni += $num;
+	}
+	my($count,$percent,$num_peak) = split(/\t/,$kmers[$kmer_depth]);
+	my $kmer_org = int($size*(1-$repeat)); # unique kmers
+	print "unique kmer(observe): $kmer_uni\n";
+	print "unique kmer(haploid): $kmer_org\n";
+	my $add_percent = ($kmer_uni-$kmer_org)/$kmer_org;	# 
+	my $result =1-(1-$add_percent)**(1/$k);
+	$result = 0 if($result<=0);
+	return $result;
+}
+
+# ȡ�÷�ֵ
+sub getPeaks{
+	my $CUT = 0.00005;
+	my($file) = @_;
+	open FI,"$file" or die $!;
+	my @peaks;
+	while(my $line=<FI>){
+		chomp $line;
+		my($count,$percent,$num) = split(/\t/,$line);
+		push(@kmers,"$count\t$percent\t$num");
+	}
+	close FI;
+	
+	for(my $i = 1;$i<$#kmers-1;$i++){
+		my($count1,$percent1,$num1) = split(/\t/,$kmers[$i-1]);
+		my($count2,$percent2,$num2) = split(/\t/,$kmers[$i]);
+		my($count3,$percent3,$num3) = split(/\t/,$kmers[$i+1]);
+		push(@peaks,$count2) if($percent2>$percent1 && $percent2>$percent3 && $percent2>$CUT);
+	}
+	return @peaks;
+}
+
+# ȡ�� unique kmer ����Ϣ
+sub getFirstLine{
+	my($file) = @_;
+	open FI,"$file" or die $!;
+	my $line = <FI>;
+	chomp $line;
+	my @array = split(/\t/,$line);
+	close FI;
+	return @array;
+}
+
+# ȡ�ùյ�
+sub inflexion{
+	my $num_err = 0;
+	for(my $i = 1;$i<$#kmers-1;$i++){
+		my($count1,$percent1,$num1) = split(/\t/,$kmers[$i-1]);
+		my($count2,$percent2,$num2) = split(/\t/,$kmers[$i]);
+		my($count3,$percent3,$num3) = split(/\t/,$kmers[$i+1]);
+		return $count2 if($percent2<$percent1 && $percent2<$percent3);
+	}
+	return 2;
+}
+
+sub getSize1{
+	my $inflexion = &inflexion();
+	my($kmer_num,$kmer_exp) = @_;
+	$inflexion = 2 if($inflexion>=0.5*$kmer_exp);
+	# get the error kmer number
+	my $kmer_e =0;
+	for(my $i=0;$i<=$inflexion;$i++){
+		my($count,$percent,$num) = split(/\t/,$kmers[$i]);
+		$kmer_e += $count*$num;
+	}
+	$kmer_error = $kmer_e;
+	my $kmer_cor = $kmer_num-$kmer_e;
+	print "correct kmer: $kmer_cor\n";
+	my $size = int($kmer_cor/$kmer_exp);
+	return $size;
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <in.fasta> <out.fasta> \n" if(@ARGV==0);
+
+my($infile, $outfile) = @ARGV;
+
+my $in_hdl  = myOpen($infile);
+my $out_hdl = myOpen(">$outfile");
+
+my ($id,$seq);
+my $pre_id = "";
+my @array;
+while (getSeq($in_hdl,\$id,\$seq)!=-1) 
+{
+    my $cell = $id;
+    $cell =~ s/\d+_\d+$//g;
+    output() if($cell ne $pre_id);
+    push(@array, "$id $seq");
+    $pre_id = $cell;
+}
+output();
+close $in_hdl;
+close $out_hdl;
+
+sub by_len{
+    my($id1, $seq1) = split(/\s+/, $a);
+    my($id2, $seq2) = split(/\s+/, $b);
+    my $len1 = length($seq1);
+    my $len2 = length($seq2);
+    return $len2<=>$len1;
+}
+
+sub output{
+    return if(@array==0);
+    @array = sort by_len @array;
+    my($id, $seq) = split(/\s+/, $array[0]);
+    print $out_hdl ">$id\n$seq\n";
+    @array = ();
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+my $file = shift;
+
+my $min_length = 0;
+my $name = '';
+my $seq = '';
+
+my $in_hdl = myOpen($file);
+while(<$in_hdl>){
+   if(/^>(\S+)/){
+      &print_scafftig($name, $seq) if($seq);
+      $name = $1;
+      $seq  = '';
+   } else {
+      chomp;
+      $seq .= $_;
+   }
+}
+&print_scafftig($name, $seq) if($seq);
+
+close $in_hdl;
+1;
+
+sub print_scafftig {
+   my $name = shift;
+   my $seq  = shift;
+   my $temp = $seq;
+   my $id = 1;
+   my $flag = 0;
+   my $pos = 1;
+   while($seq=~/([ATGCatgc]+)/g){
+   my $s = $1;
+   if($flag==1){
+      if($temp=~/([ATGCatgc]+[Nn]+)/g){
+         my $g = $1;
+         $pos+=length($g);
+      }
+   }
+   else{$flag=1;}
+   next if(length($s) < $min_length);
+   print ">$name\_$id|start=$pos|length=".length($s)."\n";
+   #while($s=~/(.{1,60})/g){
+    #  print "$1\n";
+   #}
+   print "$s\n";
+   $id++;
+}
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+use List::Util qw(max min);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <graph.info> <node.pos> <outpefix>  \n" if(@ARGV==0);
+
+my($ingraph, $nodefile, $outfile) = @ARGV;
+
+my($in_hdl, $ou_hdl, $ou2_hdl);
+
+# 记录backbone
+# ==============================================================================
+# |
+debug("record backbone..");
+
+my %bac_num_hash;
+my %ctg_bac_hash;
+
+my %ctg_idx_hash;
+my %idx_ctg_hash;
+
+$in_hdl = myOpen($ingraph);
+while (my $line=<$in_hdl>) 
+{
+	# backbone
+	chomp $line;
+	$line =~ /^>(\S+)/;
+	my $backbone = $1;
+
+	# contigs
+	$line = <$in_hdl>;
+	chomp $line;
+	my @nodes = split(/\s+/, $line);
+	my $num = @nodes;
+
+	# ctg2backbone
+	for(my $i=0; $i<$num; $i++)
+	{
+		my $node = $nodes[$i];
+		my($ctg, $strand, $pos) = split(/,/, $node);
+		
+		# 将contig转成数字，方便排序
+		$ctg_idx_hash{"$ctg,$strand"} = $i;
+		$idx_ctg_hash{"$backbone,$i"} = "$ctg,$strand";
+
+		# contig在backbone上的情况
+		$ctg_bac_hash{$ctg} = "$backbone $strand $pos";
+	}
+
+	$bac_num_hash{$backbone} = $num;
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+
+
+
+
+# 对pacbio reads 进行归类
+# ==============================================================================
+# |
+debug("class pacbio reads..");
+
+$in_hdl = myOpen($nodefile);
+$ou_hdl = myOpen(">$outfile.pb");
+$ou2_hdl= myOpen(">$outfile.mb");
+while (my $line=<$in_hdl>) 
+{
+	# pacbio
+	chomp $line;
+	$line =~ /^>(\S+)/;
+	my $id = $1;
+	
+	# contigs
+	$line = <$in_hdl>;
+	chomp $line;
+	my @nodes = split(/\s+/, $line);
+	
+	# target backbone
+	my @array = targetBac(@nodes);
+	my($backbone, $strand, $num) = split(/\s+/, $array[0]);
+
+	# output the pacbio read #
+	my $head = "$id,$strand\t$backbone\t";
+	@nodes = revPB(@nodes) if($strand eq "-");
+
+	my $info = "";
+	my @matrix = ();
+	foreach my $node (@nodes){
+		my($ctg, $strand, $pos) = split(/,/, $node);
+		next if(!exists $ctg_bac_hash{$ctg});
+		
+		my($strand2, $backbone2, $pos2, $index) = getCtgInfo($ctg);
+		next if($backbone2 ne $backbone);
+		next if($strand ne $strand2);
+
+		if(isMatch($pos, $pos2, \@matrix)!=0){
+			$info .= "$index\t";
+		}
+	}
+	$num = scalar @matrix;
+	print $ou_hdl "$head\t$num\t$info\n";
+
+	# output the maybe connection
+	if(@array>1){
+		foreach(@array)
+		{
+			my($backbone, $strand, $num) = split;
+			print $ou2_hdl "$backbone,$strand\t";
+		}
+		print $ou2_hdl "\n";
+	}
+}
+close $in_hdl;
+close $ou_hdl;
+close $ou2_hdl;
+
+`sort -k 2,2 -k 4,4n -k 3,3nr -S 1g -o $outfile.pb $outfile.pb`;
+# |
+# ==============================================================================
+
+
+# 对backbone进行连接
+# ==============================================================================
+# |
+my %idx_pb_hash;
+
+my $pre_bac = "";
+$in_hdl = myOpen("$outfile.pb");
+$ou_hdl = myOpen(">$outfile.lk");
+while (<$in_hdl>) {
+	chomp;
+	my($pb, $backbone, $num, @indexs) = split;
+	outBackbone() if($backbone ne $pre_bac);
+	for(my $i=0; $i<$num; $i++)
+	{
+		my $idx = $indexs[$i];
+		$idx_pb_hash{$idx}{$pb} = $indexs[-1];
+	}
+	$pre_bac = $backbone;
+}
+outBackbone();
+close $in_hdl;
+close $ou_hdl;
+
+sub outBackbone
+{
+	return if($pre_bac eq "");
+
+	my $num = $bac_num_hash{$pre_bac};
+	print $ou_hdl ">$pre_bac\n";
+	for(my $idx=0; $idx<$num; $idx++)
+	{
+		my($max, $best_pb) = (-1, "");
+		while (my($pb, $idx2) = each %{$idx_pb_hash{$idx}}) 
+		{
+			next if($idx2<$max);
+			$max = $idx2;
+			$best_pb = $pb;
+		}
+		my $ctg = $idx_ctg_hash{"$pre_bac,$idx"};
+		print $ou_hdl "$ctg\t";
+		
+		if($max > $idx){
+			print $ou_hdl "$best_pb\t";
+			$idx = $max-1;
+		}
+	}
+	print $ou_hdl "\n";
+	%idx_pb_hash = ();
+}
+# |
+# ==============================================================================
+
+
+
+
+# 节点能否与backbone一致
+# ==============================================================================
+# |
+sub isMatch
+{
+	my($x, $y, $arr_ref) = @_;
+	if(@{$arr_ref}==0)
+	{
+		push(@{$arr_ref}, "$x,$y");
+		return 1;
+	}
+	# 斜率
+	my($x2, $y2) = split(/,/, ${$arr_ref}[-1]);
+	return 0 if($y2==$y);
+	
+	my $slope = ($x2-$x)/($y2-$y);
+	return 0 if($slope<0.9 or $slope>1.1);
+
+	push(@{$arr_ref}, "$x,$y");
+	return 1;
+}
+# |
+# ==============================================================================
+
+
+
+# 判断pb所属的backbone
+# ==============================================================================
+# |
+sub targetBac
+{
+	my @nodes = @_;
+
+	my $num = @nodes;
+	
+	# ctg 2 backbone #
+	my %bac_hash;
+	for(my $i=0; $i<$num; $i++)
+	{
+		my $node = $nodes[$i];
+		my($ctg, $strand, $pos) = split(/,/, $node);
+
+		my($strand2, $backbone, $pos2, $index) = getCtgInfo($ctg);
+		next if($index == -1);
+
+		my $strand_ = "+";
+		$strand_ = "-" if($strand ne $strand2);
+		$bac_hash{"$backbone $strand_"}++;
+	}
+
+	# get the backbone #
+	my @array;
+	while (my($backbone, $num) = each %bac_hash) 
+	{
+		push(@array, "$backbone $num");
+	}
+	@array = sort by_num(@array);
+}
+
+
+sub getCtgInfo
+{
+	my $ctg = shift;
+	my($strand, $backbone, $pos, $index) = ("", "", -1, -1);
+	if(exists $ctg_bac_hash{$ctg}){
+		($backbone, $strand, $pos) = split(/\s+/, $ctg_bac_hash{$ctg});
+		$index = $ctg_idx_hash{"$ctg,$strand"};
+	}
+	return($strand, $backbone, $pos, $index);
+}
+
+
+sub by_num
+{
+	my($id1, $strand1, $num1) = split(/\s+/, $a);
+	my($id2, $strand2, $num2) = split(/\s+/, $b);
+	return $num2<=>$num1;
+}
+# |
+# ==============================================================================
+
+
+
+
+# 反转节点
+# ==============================================================================
+# |
+sub revPB
+{
+	my @array = @_;
+	@array = reverse @array;
+	my($id_, $strand_, $pos_) = split(/,/, $array[0]);
+	for(my $i=0; $i<=$#array; $i++)
+	{
+		my($id, $strand, $pos) = split(/,/, $array[$i]);
+		$strand = ($strand eq "+") ? "-":"+";
+		$pos = $pos_-$pos;
+		$array[$i] = "$id,$strand,$pos";
+	}
+	return @array;
+}
+# |
+# ==============================================================================
+
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin $RealScript);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+=head1 Name
+
+    Graph.pl  --The De novo tool to build k-mer graph
+
+=head1 Usage
+
+    Graph.pl <command> [arguments]
+
+    Command should be one of the following command. Arguments depend on specific command.
+
+    Command List:
+                count   Record k-mer and related occurrence by jellyfish
+                        Arguments:
+                          -i <FILE>       the file list to count kmer
+                          -k <INT>        the k-mer size to store occupied k-mer [17]
+                          -m <INT>        the mininum occurrence of kmer [3]
+
+                graph   Build graph by using GATB tookit(for Lordec)
+                          Arguments:
+                          -i <FILE>       the kmer table file with format "ATGC 1"
+                          -m <INT>        the mininum occurrence of kmer [3]
+                          -x <INT>        the maxinum occurrence of kmer [-1]
+                          -k <INT>        the k-mer size [17]
+
+                bit     Record k-mer into bitset, this method is for k<=17.
+                          -i <FILE>       the kmer table file with format "ATGC 1"
+                          -m <INT>        the mininum occurrence of kmer [3]
+                          -x <INT>        the maxinum occurrence of kmer [-1]
+                          -k <INT>        the k-mer size to store occupied k-mer [17]
+
+                pipe    Combine step(s) above
+                          -i <FILE>       the file list
+                          -m <INT>        the mininum occurrence of kmer [3]
+                          -k <INT>        the k-mer size to store occupied k-mer [17]
+                          -s <INTs>       the step to do
+                                          1: count k-mer by jellyfish
+
+                                          2: record unique k-mer into .h5 file
+                                          3: record unique k-mer into .bit file
+
+                                          4: record all k-mer into .h5 file
+                                          5: record all k-mer into .bit file
+
+                                          6: record all kmer into .bit with -m is 0.5 the peak
+
+                                          7: get the genome size, repeate rate and hete rate
+
+                -d      The output directory
+
+=head1 Example
+
+For k=17, we recommend:
+
+  perl Graph.pl pipe -i fq.lst -m 2 -k 17 -s 1,3,5 -d Kmer_17
+
+For k>17, we recommend:
+
+  perl Graph.pl pipe -i fq.lst -m 2 -k 23 -s 1,2,4 -d Kmer_23
+
+=cut
+
+
+my($command) = @ARGV;
+
+my(
+$opt_i, $opt_m, $opt_x, $opt_k,
+$opt_d, $opt_s, $help
+);
+# Get parameters
+# ==============================================================================
+# |
+GetOptions(
+"i=s"     => \$opt_i,
+"m:i"     => \$opt_m,
+"x:i"     => \$opt_x,
+"k=i"     => \$opt_k,
+"s:s"     => \$opt_s,
+"d=s"     => \$opt_d,
+"help|h"  => \$help,
+);
+
+$opt_m ||= 3;
+$opt_x ||= -1;
+$opt_k ||= 17;
+
+checkParam();
+# |
+# ==============================================================================
+
+
+# Software path
+# ==============================================================================
+# |
+# jellyfish
+my $KMER_COUNT = abs_path("$Bin/kmer_counter.pl");
+# convert jellyfish format to fasta
+my $KMER2FA = "perl $Bin/dump2fa.pl ";
+# record kmer by GATB
+my $GRAPH = "$Bin/buildGraph ";
+# record kmer bit bitset
+my $BUILD = "$Bin/buildIndex";
+
+# estimate the genome size, repeate rate and
+my $FORMAT = "perl $Bin/format.pl";
+my $ANALYSE = "perl $Bin/GenomeAnalysis.pl";
+# |
+# ==============================================================================
+
+my $cmd = "source $Bin/source.sh\n";
+
+
+# Count Kmers By Jellyfish
+# ==============================================================================
+# |
+if($command eq "count")
+{
+  # dir
+  $opt_d ||= "Jellyfish";
+  mkdir("$opt_d") if(!-e $opt_d);
+
+  # kmer list
+  my $list = abs_path("$opt_d/kmer.lst");
+  my $out_hdl = myOpen(">$list");
+  my $in_hdl = myOpen($opt_i);
+  while (<$in_hdl>)
+  {
+      chomp;
+      next if(length($_)==0);
+      my $file = abs_path($_);
+      print $out_hdl "$file\n";
+  }
+  close $in_hdl;
+  close $out_hdl;
+
+  $cmd .= "cd $opt_d\n";
+  $cmd .= "perl $KMER_COUNT --k $opt_k --memory 10 --Prefix k$opt_k $list\n";
+  $cmd .= "sh k$opt_k.sh\n";
+
+  # save disk
+  $cmd .= "rm k$opt_k.jf\n";
+  $cmd .= "awk '\$2>1' k$opt_k.dump > filt.dump && rm k$opt_k.dump\n" if($opt_m>1);
+  $cmd .= "mv k$opt_k.dump filt.dump\n" if($opt_m==1);
+  $cmd .= "gzip  -f filt.dump\n";
+
+  debug("$cmd");
+  system($cmd);
+}
+# |
+# ==============================================================================
+
+
+
+
+# build graph
+# ==============================================================================
+# |
+if($command eq "graph")
+{
+    # dir
+    $opt_d ||= "GATB";
+    mkdir("$opt_d") if(!-e $opt_d);
+    my $outfile = abs_path("$opt_d/kmer_$opt_k");
+
+    # input
+    $opt_i = abs_path($opt_i);
+    #convert to fasta
+    $cmd .= "$KMER2FA $opt_i $opt_m $opt_x ";
+    #build graph
+    $cmd .= " | $GRAPH -k $opt_k -m 1 -i /dev/stdin -o $outfile -T 1";
+
+    debug("$cmd");
+    system($cmd);
+}
+# |
+# ==============================================================================
+
+
+
+# record unique k-mer into .bit file
+# ==============================================================================
+# |
+if($command eq "bit")
+{
+    # the slope of kmer
+    die "the kmer size must <=18" if($opt_k>18);
+
+    # dir
+    $opt_d ||= "Bit";
+    mkdir("$opt_d") if(!-e $opt_d);
+
+    # dir
+    mkdir("$opt_d") if(!-e $opt_d);
+    my $outfile = abs_path("$opt_d/kmer_$opt_k.bit");
+
+    # input
+    $opt_i = abs_path($opt_i);
+
+    # build graph
+    $cmd .= "$BUILD -d $opt_i -k $opt_k -m $opt_m -x $opt_x -b $outfile\n";
+
+    debug("$cmd");
+    system($cmd);
+}
+# |
+# ==============================================================================
+
+
+
+# pipeline
+# ==============================================================================
+# |
+if($command eq "pipe")
+{
+    # dir
+    $opt_d ||= "Kmer_$opt_k";
+    mkdir("$opt_d") if(!-e $opt_d);
+
+    my $count_dir = abs_path("$opt_d/01.KmerCount");
+    my $dir_uni_h5  = abs_path "$opt_d/02.Uinque_h5";
+    my $dir_uni_bit = abs_path "$opt_d/02.Uinque_bit";
+    my $dir_all_h5  = abs_path "$opt_d/03.All_h5";
+    my $dir_all_bit = abs_path "$opt_d/03.All_bit";
+    my $dir_peak_bit = abs_path "$opt_d/04.peak_bit";
+    my $dir_analyse = abs_path "$opt_d/05.Analyse";
+
+    # input
+    $opt_i = abs_path($opt_i);
+
+    # steps
+    my %step_hash;
+    my @steps = split(/,/,$opt_s);
+    $step_hash{$_}=1 foreach(@steps);
+
+    # count kmer by jellyfish
+    if(exists $step_hash{1})
+    {
+        my $cmd = "perl $0 count -k $opt_k -i $opt_i -m $opt_m -d $count_dir\n";
+        debug($cmd);
+        system($cmd);
+    }
+
+    # store unique kmer by GATB
+    if(exists $step_hash{2})
+    {
+        my $input = "$count_dir/filt.dump.gz";
+        my $histo = "$count_dir/k$opt_k.histo";
+
+        my $peak = getPeak($histo);
+        my $max = int(1.5*$peak)+1 if($peak>0);
+
+        debug("peak: $peak");
+        die "can't find peak" if($peak<0);
+
+        my $cmd = "perl $0 graph -k $opt_k -i $input ";
+        $cmd .= "-m $opt_m -x $max -d $dir_uni_h5\n";
+        system($cmd);
+    }
+
+    # store the unique kmer by bitset
+    if(exists $step_hash{3})
+    {
+        my $input = "$count_dir/filt.dump.gz";
+        my $histo = "$count_dir/k$opt_k.histo";
+
+        my $peak = getPeak($histo);
+        my $max = int(1.5*$peak)+1 if($peak>0);
+
+        debug("peak: $peak");
+        die "can't find peak" if($peak<0);
+
+        my $cmd = "perl $0 bit -k $opt_k -i $input ";
+        $cmd .= "-m $opt_m -x $max -d $dir_uni_bit\n";
+        system($cmd);
+    }
+
+    if(exists $step_hash{4})
+    {
+        my $input = "$count_dir/filt.dump.gz";
+        my $histo = "$count_dir/k$opt_k.histo";
+
+        my $cmd = "perl $0 graph -k $opt_k -i $input ";
+        $cmd .= "-m $opt_m -x $opt_x -d $dir_all_h5\n";
+        system($cmd);
+    }
+
+    if(exists $step_hash{5})
+    {
+        my $input = "$count_dir/filt.dump.gz";
+        my $histo = "$count_dir/k$opt_k.histo";
+
+        my $cmd = "perl $0 bit -k $opt_k -i $input ";
+        $cmd .= "-m $opt_m -x $opt_x -d $dir_all_bit\n";
+        system($cmd);
+    }
+
+    if(exists $step_hash{6})
+    {
+        my $input = "$count_dir/filt.dump.gz";
+        my $histo = "$count_dir/k$opt_k.histo";
+
+        my $peak = getPeak($histo);
+        die "can't find the peak\n" if($peak<0);
+
+        my $min_occ = $opt_m;
+        $min_occ = int(0.5*$peak) if($peak>0);
+        $min_occ = $opt_m if($min_occ<$opt_m);
+
+        my $cmd = "perl $0 bit -k $opt_k -i $input ";
+        $cmd .= "-m $min_occ -x $opt_x -d $dir_peak_bit\n";
+        system($cmd);
+    }
+
+    if(exists $step_hash{7})
+    {
+        mkdir($dir_analyse);
+        chdir($dir_analyse);
+
+        my($node, $total) = getInfo("$count_dir/k$opt_k.stats");
+
+        my $cmd = "cd $dir_analyse \n";
+        $cmd .= "$FORMAT $count_dir/k$opt_k.histo kmer.xls $node\n";
+        $cmd .= "$ANALYSE kmer.xls $opt_k $total > result.txt \n";
+
+        system($cmd);
+    }
+}
+# |
+# ==============================================================================
+
+
+
+# Get the node number and total kmer
+# ==============================================================================
+# |
+sub getInfo{
+    my $file = shift;
+    my $in_hdl = myOpen($file);
+
+    my($node, $total) = (0, 0);
+    while (<$in_hdl>)
+    {
+        chomp;
+        my($key, $value) = split;
+        $node  = $value if($key eq "Distinct:");
+        $total = $value if($key eq "Total:");
+    }
+    close $in_hdl;
+
+    return($node, $total);
+}
+# |
+# ==============================================================================
+
+
+# Get The Peak from product（乘积曲线）
+# ==============================================================================
+# |
+sub getPeak
+{
+    my($peak, $max_time) = (-1, -1);
+
+    my ($file, $min, $max) = @_;
+    $min ||= 3;
+    $max ||= 1000;
+
+    # get the peak
+    my @array;
+    my $in_hdl = myOpen($file);
+    while (<$in_hdl>)
+    {
+        chomp;
+        my($occ, $num) = split;
+        next if($occ<$min);
+        last if($occ>$max);
+        my $time = $occ*$num;
+        shift @array if(@array==3);
+        push(@array, "$occ $time");
+        if(@array==3)
+        {
+            my($occ0, $time0) = split(/\s+/,$array[0]);
+            my($occ1, $time1) = split(/\s+/,$array[1]);
+            my($occ2, $time2) = split(/\s+/,$array[2]);
+            if($time1>$time0 && $time1>$time2 && $time1>$max_time)
+            {
+                $peak = $occ1;
+                $max_time = $time1;
+            }
+        }
+    }
+    close $in_hdl;
+
+    return $peak;
+}
+# |
+# ==============================================================================
+
+
+# Check parameters
+# ==============================================================================
+# |
+sub checkParam
+{
+    if ($help || @ARGV != 1)
+    {
+        die `pod2text $0`;
+    }
+}
+# |
+# ==============================================================================
+﻿#!/usr/bin/perl
+=head1 Version
+  Author: Wang Chongzhi, wangchongzhi@genomics.org.cn
+  Version: 0.1,  Date: 2011-9-6
+  Version: 0.2,  Date: 2011-9-8
+  Version: 0.5,  Date: 2011-9-9
+  Version: 1.0,  Date: 2011-9-19 
+  Version: 2.0,  Date: 2014-2-20	modified by Dongliang Zhan, zhandongliang@genomics.cn
+=head1 Usage
+  perl kmer_counter.pl <list_file_of_sequence_data_file(s)>
+  --k <num>          Length of mers(default=17, must in [11,31])
+  --memory <num>     Memory usage(default=10,in Gbytes,i.e. 32th power of 2 in bytes, 1G at least)
+  --Prefix <str>     Output Prefix(default=count[k]mer_by_[current job id])
+  --help             Output help information to screen and exit
+  You must confirm that your input file is the list of sequence data file(s) in the absolute path(s) and the sequence data file(s) should be gziped.
+Example
+  1.work with default options (the most simplest way)
+  perl kmer_counter.pl my_sequence_data_file.list
+  2.work with user specifed options: (to select --k,--memory,--Prefix)
+  perl kmer_counter.pl --k 23 --memory 10 --Prefix k17mer my_sequence_data_file.list
+=cut
+
+use strict;
+use Getopt::Long;
+use FindBin qw($Bin $Script);
+
+##get options from command line into variables and set default values
+my ($K, $Memory, $Prefix, $Help, $T, $Time_file, $Hash_size);#$T represents Thread_number.
+GetOptions(
+        "k:i"=>\$K,
+        "memory:f"=>\$Memory,
+        "Prefix:s"=>\$Prefix,
+        "help"=>\$Help
+);
+die `pod2text $0` if (@ARGV == 0 || $Help);
+$K ||= 17;
+die "Invaid value of --k :  must be in [11,31]!" if $K<11||$K>31;
+$Memory ||= 10;
+$Memory=1 if $Memory<1;
+$T ||= 1;
+
+
+#obtain the list of data file(s) which contain(s) the sequnece in ".gz" format of fa or fq file(s).
+my $sources_list_file=pop @ARGV;
+
+$Prefix ||= "count".$K."mer_by_".$$;
+$Time_file=$Prefix.".time";
+
+&compute_hash_size($K,$Memory);
+
+#   generate the shellscript for work   #
+my $work_file=$Prefix.".sh";
+my $log_file=$Prefix.".log";
+my $error_file=$Prefix.".error";
+open OUT,">$work_file";
+
+
+#generate the command line to merge the binary files of hash table generated by "jellyfish count"
+my $merged_file=$Prefix.".jf";
+#generate the command line to count kmers
+print OUT "perl $Bin/readFiles.pl $sources_list_file | jellyfish count -m $K -o $Prefix --timing $Time_file -s $Hash_size -t $T -c 8 -C /dev/fd/0 1>$log_file 2>$error_file\n";
+
+#merge file
+print OUT "if [ -e ${Prefix}_1 ]; then\n";
+print OUT "  jellyfish merge -v -o $merged_file ${Prefix}_* 1>>$log_file 2>>$error_file\n";
+print OUT "else \n";
+print OUT "  mv ${Prefix} $merged_file\n";
+print OUT "fi\n";
+
+#generate the command line to dump the the binary files of hash table,usually useless.
+my $dump_file=$Prefix.".dump";
+print OUT "jellyfish dump -c -t -o $dump_file $merged_file 1>>$log_file 2>>$error_file\n";
+#generate the command line to obtain statistics of kmers
+my $stats_file=$Prefix.".stats";
+print OUT "jellyfish stats -o $stats_file $merged_file 2>>$error_file\n";
+#generate the command line to histogram kmers
+#my $high_frequency=511;
+my $histo_file=$Prefix.".histo";
+print OUT "jellyfish histo -t $T $merged_file | sed 's/ /\t/g' >$histo_file\n";
+close OUT;
+
+#####      finish the shellscript for work    ##################################
+################################################################################
+
+#   print the informations suggested for qsub this kmers-counting job
+$Memory=$Memory."G";
+print "That's OK! The shell script is finished in $work_file!\n\n";
+print "You can qsub your job as following with some appropriate modifications:\n";
+print "\t qsub -cwd -l vf=$Memory -l p=$T -q bc_mem.q -P bc_mem $work_file\n";
+print "Here,\"vf=$Memory\" and \"p=$T\" is arranged previously by yourself;\"$work_file\" is generated just now.\n";
+print "\"bc_mem.q\" can be replaced by the queue you want and \"bc_mem\" by the name of the Project your job belongs to.\n";
+
+
+
+##the subroutine which convert memory to hash size
+sub compute_hash_size{
+	my ($k,$memory,$t) = @_;
+	my $m = $memory * 1073741824;
+	$Hash_size=4**$k;
+	for (my $l=2*$k;$l>16;$l--){
+		#2k-l+r+1, default r=11,log_2_1953.
+		my $h=((2*$k-$l+12)/8+0.5)*$Hash_size;#h represent hash_and_counter_usage_modified, 0.5 is the coefficient.
+		if($h<$m){
+			for ($t=2;$t<=32;$t++){
+				last if $h>$m-&basic_usage($t);
+			}
+			$T=$t-1;
+			$Memory=sprintf "%.1f",($h+&basic_usage($T))/1073741824;
+			return;
+		}
+		$Hash_size/=2;
+        }
+}
+
+sub basic_usage{
+	my ($t)=@_;
+        #The default value of reprobe is 1953 in jellyfish-1.1.2, which is different from that its help information shows.
+        my $max_reprobe ||= 1953;#obtained by adding -v option when using the subroutine MERGE of Jellyfish.
+        my $out_buffer_size ||= 20000000;#obtained by "jellyfish count --full-help".
+        my $buffer_size ||= 8192;#obtained by "jellyfish count --full-help".
+        my $buffers ||= 24;#obtained from much uninteresting test and 'top'.
+
+        my $heap_size = $max_reprobe*($max_reprobe+1)/2;#from the article.
+        my $total_heap_size = $heap_size*$t;
+        my $total_buffer_size = $buffer_size*$buffers*$t;
+        my $total_out_buffer_size = $out_buffer_size*$t;
+	return $total_heap_size+$total_buffer_size+$total_out_buffer_size+27000000*$t+10000000;#The size of Jellyfish's code is 5.4M. 
+}
+
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+use List::Util qw(max min);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <contig.fa> <pb.fa> <convt.best> <outfile> <simi:0.001>\n" if(@ARGV==0);
+
+
+my($contig, $pb, $align, $outfile, $SIMI) = @ARGV;
+$SIMI ||= 0.001;
+
+my($in_hdl, $ou_hdl,$lg_hdl);
+
+
+
+
+# get the best pb for each gap
+# ==============================================================================
+# |
+my %pb_hash;
+my %link_hash;
+$in_hdl = myOpen($align);
+while (<$in_hdl>) {
+    chomp;
+    my($scf_id, $index1, $index2,
+        $q_id, $t_id, $t_id2, $strand,
+        $gap_scf, $gap_pb, $anchor1, $anchor2, 
+        $q_len, $t_len, $t_len2) = split;
+
+    $pb_hash{$q_id} = 1;
+
+    $link_hash{"$scf_id $index1"}{$index2} = "$q_id\t$strand\t$anchor1\t$anchor2";
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+
+
+# store the pb reads 
+# ==============================================================================
+# |
+debug("loading pabio reads...");
+
+my($id, $seq);
+$in_hdl = myOpen($pb);
+while (getSeq($in_hdl,\$id,\$seq)!=-1)
+{
+    next if(!exists $pb_hash{$id});
+    $pb_hash{$id} = $seq;
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+
+# load and link contigs
+# ==============================================================================
+# |
+debug("close gap...");
+
+my @array = ("");
+my $pre_scf = "";
+
+$in_hdl = myOpen($contig);
+$ou_hdl = myOpen(">$outfile");
+$lg_hdl = myOpen(">$outfile.log");
+
+while (getSeq($in_hdl,\$id,\$seq)!=-1)
+{
+    my($scf, $index, $start, $len) = parseID($id);
+
+    linkCtg() if($scf ne $pre_scf);
+
+    push(@array, "$id\t$seq");
+    $pre_scf = $scf;
+}
+linkCtg();
+close $in_hdl;
+close $ou_hdl;
+close $lg_hdl;
+# |
+# ==============================================================================
+
+
+
+
+
+
+################################################################################
+####################    subroutine   ###########################################
+################################################################################
+
+# get the id info
+# ==============================================================================
+# |
+sub parseID{
+    my $id = shift;
+    $id =~ /(\S+)_(\d+)\|start=(\d+)\|length=(\d+)/;
+    return($1, $2, $3, $4);
+}
+# |
+# ==============================================================================
+
+
+
+# get the gap size
+# ==============================================================================
+# |
+sub getGap{
+    my($id1, $id2) = @_;
+    my($scf1, $index1, $start1, $len1) = parseID($id1);
+    my($scf2, $index2, $start2, $len2) = parseID($id2);
+    my $gap = $start2-$start1-$len1;
+    return $gap;
+}
+# |
+# ==============================================================================
+
+
+
+# close gap
+# ==============================================================================
+# |
+sub linkCtg
+{
+    return if(@array<=1);
+
+    my($id, $seq) = split(/\s+/, $array[1]);
+    my $scf = $seq;
+    
+    for(my $i=1; $i<@array; $i++)
+    {
+        my($id1, $seq1)  = split(/\s+/, $array[$i]);
+        my $len1 = length($seq1);
+
+        # close gap
+        my $is_close = 0;
+        my $key = "$pre_scf $i";
+        if(exists $link_hash{$key})
+        {
+            # get the next sequence
+            my @idxs = keys %{$link_hash{$key}};
+            @idxs = sort {return $a<=>$b} @idxs;
+            my $next_idx = $idxs[0];
+            my ($id2, $next_seq) = split(/\s+/, $array[$next_idx]);
+
+            my $len2 = length($next_seq);
+            my $gap = getGap($id1, $id2);
+            
+            # the pb read
+            my ($pb_id, $strand, $anchor1, $anchor2) =
+                                    split(/\s+/, $link_hash{$key}{$next_idx});
+            my $pb_seq = $pb_hash{$pb_id};
+            if($strand eq "-"){
+                $pb_seq = revCom($pb_seq);
+            }
+
+            # connect sequences
+            my($pb_part, $merge);
+            my $ovl = 400;
+            $pb_part = cutSeq($pb_seq, $anchor1, $anchor2, $len1, $len2, $ovl);
+            $merge = con_seq($scf, $pb_part, $next_seq, $ovl); 
+           
+            if($merge ne "")
+            {
+                my $gap2 = length($merge)-length($scf)-length($next_seq);
+                print $lg_hdl "connect $id1 $id2 by $pb_id $gap2 $gap\n";
+
+                $scf = $merge;
+                $is_close = 1;
+                $i = $next_idx-1;
+            }else{
+                last if($i==$#array);
+                my ($id2, $next_seq) = split(/\s+/, $array[$i+1]);
+                my $gap = getGap($id1, $id2);
+                $scf .= "N"x$gap;
+                $scf .= $next_seq;
+                print $lg_hdl "cannot connect $id1 $id2 by $pb_id $gap\n";
+            }
+        }
+    }
+
+    print $ou_hdl ">$pre_scf\n$scf\n";
+    @array=("");
+}
+# |
+# ==============================================================================
+
+
+
+# cut the sequence by overlap
+# ==============================================================================
+# |
+sub cutSeq{
+    my($pb_seq, $anchor1, $anchor2, $t1_len, $t2_len, $ovl) = @_;
+
+    my($q_pos1, $t1_pos) = split(/,/, $anchor1);
+    my($q_pos2, $t2_pos) = split(/,/, $anchor2);
+
+    #                 t1_pos t1_len       t2_pos
+    #   ---------------|------|      --|-------
+    #             -----|------|--------|----
+    #               q_pos1           q_pos2
+    my $pb_len = length($pb_seq);
+
+    $q_pos1 += $t1_len-$t1_pos-$ovl;
+    $q_pos1  = 0 if($q_pos1<0);
+
+    $q_pos2 -= $t2_pos-$ovl;
+    $q_pos2  = $pb_len-1 if($q_pos2>=$pb_len);
+
+    my $len  = $q_pos2-$q_pos1;
+    my $sub_seq = substr($pb_seq, $q_pos1, $len);
+    return $sub_seq;
+}
+# |
+# ==============================================================================
+
+
+# 连接3条序列
+# ==============================================================================
+# |
+sub con_seq{
+    my($left, $mid, $right, $ovl) = @_;
+    my($seq1, $simi1) = &link($left, $mid, $ovl);
+
+    return "" if($seq1 eq "");
+
+    my($seq2, $simi2) = &link($seq1, $right, $ovl);
+    return $seq2;
+}
+# |
+# ==============================================================================
+
+
+# 连接2条相邻的序列
+# ==============================================================================
+# |
+sub link{
+	my($seq1, $seq2, $ovl) = @_;
+	my $len1 = length($seq1);
+	my $len2 = length($seq2);
+    $ovl = min($len1, $len2, $ovl);
+
+	my $part1 = substr($seq1, -$ovl, $ovl);
+    my $part2 = substr($seq2, 0, $ovl);
+	my($simi, $anchor) = align($part1, $part2, 5);
+
+    # die "$simi\n" if($simi<$SIMI);
+
+	return ("", $simi) if($simi<$SIMI);
+	return ("", $simi) if($anchor eq "-1 -1");
+
+	my($pos1, $pos2) = split(/\s+/, $anchor);
+
+	my $merge = substr($seq1,0,$len1-$ovl+$pos1);
+	$merge .= substr($seq2, $pos2);
+
+	return ($merge, $simi);
+}
+# |
+# ==============================================================================
+
+
+
+
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <graph.info> <outfile> <readfile1> <readfile2> ..<readfilen>\n" if(@ARGV==0);
+
+my($graph, $outfile, @inputs) = @ARGV;
+
+
+my $in_hdl;
+my $ou_hdl;
+my $ou2_hdl;
+
+my %id_hash;
+my %seq_hash;
+
+# Record the graph's reads
+# ==================================================================================================
+# |
+$in_hdl = myOpen($graph);
+while (my $id = <$in_hdl>)
+{
+	my $nodes = <$in_hdl>;
+	chomp $nodes;
+	my @nodes = split(/\s+/, $nodes);
+	foreach my $node(@nodes)
+	{
+		my($id, $strand) = split(/,/, $node);
+		$id_hash{$id} = $strand;
+	}
+}
+close $in_hdl;
+
+foreach my $file(@inputs)
+{
+	my($id, $seq);
+	$in_hdl = myOpen($file);
+	while (getSeq($in_hdl,\$id,\$seq)!=-1) {
+		next if(!exists $id_hash{$id});
+		$seq_hash{$id} = $seq;
+	}
+	close $in_hdl;
+}
+# |
+# ==================================================================================================
+
+
+# Link the sequence for graph
+# ==================================================================================================
+# |
+$in_hdl = myOpen($graph);
+$ou_hdl = myOpen(">$outfile");
+$ou2_hdl = myOpen(">$outfile.log");
+while (my $id = <$in_hdl>)
+{
+	chomp $id;
+	my $nodes = <$in_hdl>;
+	chomp $nodes;
+	my @nodes = split(/\s+/, $nodes);
+
+	my $index = 0;
+	my $pre_id;
+	my $backbone = "";
+	my @ctg_array = ();
+
+	for(my $i=0; $i<@nodes; $i++)
+	{
+		my($ctg, $strand) = split(/,/, $nodes[$i]);
+		my $seq = $seq_hash{$ctg};
+		$seq = revCom($seq) if($strand eq "-");
+
+
+		push(@ctg_array, $ctg);
+		if($backbone eq "")
+		{
+			$backbone = $seq;
+		}else{
+			my($simi, $anchor, $time) = (0, "-1 -1", 0);
+			while ($simi<0.1 && $time<4)
+			{
+				$time++;
+				my $k = 17-2*$time;
+				($simi, $anchor) = align($backbone, $seq, $k, 5);
+			}
+
+			if($simi<0.1)
+			{
+				debug("$pre_id vs $ctg: $simi");
+				print $ou_hdl "$id|$index\n$backbone\n";
+				print $ou2_hdl "$id|$index\n@ctg_array\n";
+
+				@ctg_array = ();
+				$pre_id  = $ctg;
+				$backbone = "$seq";
+				$index++;
+				next;
+			}
+
+			my $len1 = length($backbone);
+			my $len2 = length($seq);
+
+			my($pos1, $pos2) = split(/\s+/, $anchor);
+			my $tail1 = $len1-$pos1;
+			my $tail2 = $len2-$pos2;
+
+            # connect with different situation
+            if($pos1<$pos2 && $tail1<$tail2){
+                $backbone = $seq;
+            }elsif($tail1>$tail2 && $i==$#nodes){
+                $backbone = $backbone;
+            }else{
+                $backbone  = substr($backbone, 0, $pos1);
+    			$backbone .= substr($seq, $pos2);
+            }
+		}
+		$pre_id  = $ctg;
+	}
+	print $ou_hdl "$id|$index\n$backbone\n";
+	print $ou2_hdl "$id|$index\n@ctg_array\n";
+}
+close $in_hdl;
+close $ou_hdl;
+close $ou2_hdl;
+# |
+# ==================================================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <contig.fa> <short.lst> <graph.info> <outfile> <simi:0>\n" if(@ARGV==0);
+
+my($contig, $short_file, $graph, $outfile, $SIMI) = @ARGV;
+$SIMI ||= 0;
+
+# Record short contig
+# ==================================================================================================
+# |
+my %short_hash;
+my $in_hdl = myOpen($short_file);
+while (my $id=<$in_hdl>)
+{
+	chomp $id;
+	$short_hash{$id}=1;
+}
+close $in_hdl;
+# |
+# ==================================================================================================
+
+
+# Load contigs
+# ==================================================================================================
+# |
+my %seq_hash;
+
+my($id, $seq);
+$in_hdl = myOpen($contig);
+while (getSeq($in_hdl, \$id, \$seq)!=-1) {
+	next if(exists $short_hash{$id});
+	$seq_hash{$id} = $seq;
+}
+close $in_hdl;
+# |
+# ==================================================================================================
+
+
+# Output Scaffold
+# ==================================================================================================
+# |
+my $index = 0;
+
+open FO, ">$outfile";
+open LOG,">$outfile.log";
+open FO2,">$outfile.graph";
+$in_hdl = myOpen($graph);
+
+while (<$in_hdl>)
+{
+	chomp;
+
+	$index++;
+	my $id = "scaffold_$index";
+
+	my $scaffold = "";
+	my $ovl = 0;
+	my $index2 = 0;
+	my @links = split(/\s+/,$_);
+
+	my @array = ();
+	for(my $i=0; $i<=$#links; $i++)
+	{
+		my($contig, $strand, $len, $dist) = split(/,/,$links[$i]);
+
+		my $seq = $seq_hash{$contig};
+		$seq = revCom($seq) if($strand eq "-");
+		if($scaffold eq "")
+		{
+			$scaffold = $seq;
+			print LOG "$id|$index2\t$contig\t$strand\t0\n";
+		}else{
+			my ($merge, $simi) = &link($scaffold, $seq, $ovl);
+			if($merge eq ""){
+				print FO ">$id|$index2\n$scaffold\n";
+				print FO2 ">$id|$index2\n@array\n";
+				@array = ();
+
+				$scaffold = $seq;
+				$index2++;
+				print LOG "$id|$index2\t$contig\t$strand\t0\n";
+			}else{
+				$scaffold = $merge;
+				print LOG "$id|$index2\t$contig\t$simi\n";
+			}
+		}
+		push(@array, $links[$i]);
+
+		$ovl = $dist;
+		delete $seq_hash{$contig};
+	}
+	print FO ">$id|$index2\n$scaffold\n";
+	print FO2 ">$id|$index2\n@array\n";
+}
+
+while (my($id, $seq) = each %seq_hash) {
+	$index++;
+
+	my $id = "scaffold_$index";
+
+	print FO ">$id|0\n$seq\n";
+}
+
+close $in_hdl;
+close FO;
+close FO2;
+close LOG;
+# |
+# ==================================================================================================
+
+
+# 进行连接
+# ==================================================================================================
+# |
+sub link{
+	my($seq1, $seq2, $ovl) = @_;
+	my $len1 = length($seq1);
+	my $len2 = length($seq2);
+
+	my $part1 = substr($seq1, -$ovl, $ovl);
+	my $part2 = substr($seq2, 0, 2*$ovl);
+
+	my $jump = 1;
+	$jump = 50 if($SIMI>0.1);
+	my($simi, $anchor) = align($part1, $seq2, 13, $jump);
+
+
+	return "" if($simi<$SIMI);
+	return "" if($anchor eq "-1 -1");
+
+	my($pos1, $pos2) = split(/\s+/, $anchor);
+
+	my $merge = substr($seq1,0,$len1-$ovl+$pos1);
+	$merge .= substr($seq2, $pos2);
+
+	return ($merge, $simi);
+}
+# |
+# ==================================================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <contig.fa> <graph.info> <outfile>\n" if(@ARGV==0);
+
+my($contig, $graph, $outfile) = @ARGV;
+
+# Load contigs
+# ==================================================================================================
+# |
+my %seq_hash;
+
+my($id, $seq);
+my $in_hdl = myOpen($contig);
+while (getSeq($in_hdl, \$id, \$seq)!=-1) {
+	$seq_hash{$id} = $seq;
+}
+close $in_hdl;
+# |
+# ==================================================================================================
+ 
+
+# Output Scaffold
+# ==================================================================================================
+# |
+my $index = 0;
+
+open FO, ">$outfile";
+$in_hdl = myOpen($graph);
+
+while (<$in_hdl>)
+{
+	chomp;
+
+	$index++;
+	my $id = "scaffold_$index";
+	
+	my $scaffold;
+	my @links = split(/\s+/,$_);
+	foreach my $link(@links)
+	{
+		my($contig, $strand, $len, $dist) = split(/,/,$link);
+		$dist = 101 if($dist<0);
+
+		my $seq = $seq_hash{$contig};
+		$seq = revCom($seq) if($strand eq "-");
+		my $n_seq = "N"x$dist;
+		$scaffold .= $seq;
+		$scaffold .= $n_seq;
+
+		delete $seq_hash{$contig};
+	}
+	print FO ">$id\n$scaffold\n";
+}
+
+while (my($id, $seq) = each %seq_hash) {
+	$index++;
+
+	my $id = "scaffold_$index";
+	
+	print FO ">$id\n$seq\n";
+}
+
+close $in_hdl;
+close FO;
+# |
+# ==================================================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+
+die "perl $0 <file.lst> <min_len> <out>\n" if(@ARGV==0);
+
+my($list, $min_len, $out) = @ARGV;
+
+open LIST,"$list" or die $!;
+open FO,">$out" or die $!;
+open LOG,">$out.log" or die $!;
+my $index = 0;
+while(<LIST>){
+	chomp;
+	my $fa = $_;
+	my $in_hdl = myOpen($fa);
+	my($id, $seq);
+	while(getSeq($in_hdl,\$id,\$seq)!=-1)
+	{
+		my $len = length($seq);
+		next if($len<$min_len);
+        $index++;
+        my $id2 = "C_$index";
+        $seq =~ s/\r//g;
+        $seq =~ s/[^ATGCN]//g;
+		print FO ">$id2\n$seq\n";
+        print LOG "$id2\t$id\n";		
+	}
+	close $in_hdl;
+}
+close LIST;
+close FO;
+close LOG;
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN { 
+    push (@INC,"$Bin"); 
+} 
+use SeqIO;
+
+
+die "perl $0 <infile.cfg>\n" if(@ARGV==0);
+
+my($infile) = @ARGV;
+
+my $in_hdl = myOpen($infile);
+while (<$in_hdl>)
+{
+    chomp;
+    debug($_);
+    my($prefix, $read1, $read2 ) = split;
+
+    # paired-end reads
+    if(-e $read1 && -e $read2)
+    {
+        my $read1_hdl = myOpen($read1);
+        my $read2_hdl = myOpen($read2);
+
+        while (my $id1 = <$read1_hdl>) 
+        {
+            my $id2 = <$read2_hdl>;
+            my $seq1 = <$read1_hdl>;
+            my $seq2 = <$read2_hdl>;
+            if($id1 =~ /^@/)
+            {
+                <$read1_hdl>;
+                <$read1_hdl>;
+                <$read2_hdl>;
+                <$read2_hdl>;
+            }
+
+            chomp $id1;
+            chomp $seq1;
+            chomp $seq2;
+        
+            # convert seq
+            my $len1 = length($seq1);
+            my $len2 = length($seq2);
+            my $seq = "$seq1$seq2";
+            
+            # convert id
+            $id1 =~ /^[>|@](\S+)/;
+            my $id = $1;
+            $id .= "\t$prefix:$len1:$len2";
+
+            # output sequence
+            print ">$id\n$seq\n";
+        }
+        close $read1_hdl;
+        close $read2_hdl;
+    }
+    
+    # single end
+    if(!defined $read2 || !-e $read2)
+    {
+        my $seq = 'N'x10000;
+        print ">temp_1\t$prefix:0\n$seq\n";
+        print ">temp_2\t$prefix:0\n$seq\n"; 
+    
+        my $read_hdl = myOpen($read1);
+        while (my $line = <$read_hdl>) 
+        {
+            chomp $line;
+            if($line =~ /^@\w+/ || $line =~ /^>\w+/)
+            {
+        	   $line .= "\t$prefix:0";
+            }
+            print "$line\n";
+        }
+        close $read_hdl;
+    } 
+}
+close $in_hdl;
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <file.lst> <filt_len> <outfile>\n" if(@ARGV==0);
+
+my($list, $filt_len, $outfile) = @ARGV;
+
+my $list_hdl = myOpen($list);
+my $out_hdl = myOpen(">$outfile");
+while (my $file=<$list_hdl>) 
+{
+    chomp $file;
+    my $type = getType($file);
+    if($type eq "non")
+    {
+    	die "please check the format of $file\n";
+    }
+
+    my $file_hdl = myOpen($file);
+    outFQ($file_hdl, $out_hdl) if($type eq "fastq");
+    outFA($file_hdl, $out_hdl) if($type eq "fasta");
+    close $file_hdl;
+}
+close $list_hdl;
+close $out_hdl;
+
+sub getType{
+	my $file = shift;
+	my $in_hdl = myOpen($file);
+	my $line = <$in_hdl>;
+	close $in_hdl;
+
+	return "fasta" if($line =~ /^>/);
+	return "fastq" if($line =~ /^@/);
+	return "non";
+}
+
+sub outFQ{
+	my($file_hdl,$out_hdl) = @_;
+	while (my $id=<$file_hdl>) 
+	{
+        my $seq = <$file_hdl>;
+        chomp $id;
+        chomp $seq;
+        my $len = length($seq);
+        next if($len<$filt_len);
+        $id =~ s/^[@|>]//;
+        $id = (split(/\s+/,$id))[0];
+        print $out_hdl ">$id\n$seq\n";
+
+        <$file_hdl>;
+        <$file_hdl>;
+    }
+}
+
+sub outFA{
+	my($file_hdl,$out_hdl) = @_;
+	my($id,$seq);
+	while (getSeq($file_hdl,\$id,\$seq)!=-1) 
+	{
+        my $len = length($seq);
+        next if($len<$filt_len);
+        print $out_hdl ">$id\n$seq\n";
+    }
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <read1.fasta(q)> <read2.fasta(q)> <outfile>\n" if(@ARGV==0);
+
+my($read1, $read2, $outfile) = @ARGV;
+
+my $index = 0;
+my @reads = ($read1, $read2);
+my $out_hdl = myOpen(">$outfile");
+foreach my $file(@reads)
+{ 
+    my $type = getType($file);
+    if($type eq "non")
+    {
+    	die "please check the format of $file\n";
+    }
+
+    $index++;
+    my $file_hdl = myOpen($file);
+    outFQ($file_hdl, $out_hdl, $index) if($type eq "fastq");
+    outFA($file_hdl, $out_hdl, $index) if($type eq "fasta");
+    close $file_hdl;
+}
+close $out_hdl;
+
+sub getType{
+	my $file = shift;
+	my $in_hdl = myOpen($file);
+	my $line = <$in_hdl>;
+	close $in_hdl;
+
+	return "fasta" if($line =~ /^>/);
+	return "fastq" if($line =~ /^@/);
+	return "non";
+}
+
+sub outFQ{
+	my($file_hdl,$out_hdl,$prefix) = @_;
+    my $index = 0;
+	while (my $id=<$file_hdl>) 
+	{
+        my $seq = <$file_hdl>;
+        
+        chomp $seq;
+        $index++;
+        $id = "$index $prefix";
+        print $out_hdl ">$id\n$seq\n";
+
+        <$file_hdl>;
+        <$file_hdl>;
+    }
+}
+
+sub outFA{
+	my($file_hdl,$out_hdl,$prefix) = @_;
+	my $index = 0;
+    my($id,$seq);
+	while (getSeq($file_hdl,\$id,\$seq)!=-1) 
+	{
+        $index++;
+        $id = "$index $prefix";
+        print $out_hdl ">$id\n$seq\n";
+    }
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+use Qsub;
+
+# Get parameters
+# ==============================================================================
+# |
+die "perl $0 <input.cfg>\n" if(@ARGV==0);
+my($cfg_file) = @ARGV;
+
+#contig
+my $contig;
+
+# pb file
+my($genome_size, $pb_lst);
+my($filt_len);
+# kmer
+my($kmer_file, $kmer_size);
+# sge
+my($queue, $project, $pro_name, $job_num);
+# thread
+my $thread;
+# recursive
+my $recursive = 1;
+
+parseCfg($cfg_file);
+# |
+# ==============================================================================
+
+
+# Global Variables
+# ==============================================================================
+# |
+my $SLEEP = 100;
+# |
+# ==============================================================================
+
+
+# Software Paths
+# ==============================================================================
+# |
+my $MERGE = "perl $Bin/splitFQ.pl ";
+my $CTG   = "perl $Bin/get_scaftig.pl ";
+my $CUT = "perl $Bin/cutFA.pl";
+
+my $ALIGN = "perl $Bin/Align.pl";
+my $FILTER = "perl $Bin/filtAl_m.pl";
+my $CONVT = "perl $Bin/pb4ctg.pl";
+
+my $GRAPH = "perl $Bin/buildGraph_m.pl";
+my $GR2PB = "perl $Bin/graph2pb.pl";
+my $LINK =  "perl $Bin/link_m.pl";
+
+my $CORRECT = "perl $Bin/Correct.pl";
+# |
+# ==============================================================================
+
+# 目录结构
+# ==============================================================================
+# |
+mkdir("Data");
+mkdir("Shell");
+mkdir("Assemble");
+mkdir("Consensus");
+
+my $dir_input = abs_path("Data");
+my $dir_shell = abs_path("Shell");
+my $dir_align = abs_path("Align");
+my $dir_assem = abs_path("Assemble");
+my $dir_cor = abs_path("Consensus");
+# |
+# ==============================================================================
+
+
+# prepare data
+# ==============================================================================
+# |
+debug("prepare data");
+
+my $pb_data = "$dir_input/pb.fasta";
+my $contig_ = "$dir_input/contig.fasta";
+
+my $cmd = "";
+$cmd .= "$MERGE $pb_lst $pb_data $filt_len\n";
+$cmd .= "$CTG $contig | $CUT /dev/stdin $contig_ -1\n";
+system($cmd);
+
+$contig = $contig_;
+# |
+# ==============================================================================
+
+for(my $i=1; $i<=$recursive; $i++)
+{
+    # 将pacbio文件比对回contig中
+    # ==========================================================================
+    # |
+    debug("do alignment");
+
+    # 清除目录
+    `rm -r Align` if(-e "Align");
+
+    # 切分大小
+    my $divide_size = int($genome_size/10**6)+1;
+    $divide_size=400 if($divide_size>400);
+
+    # 比对脚本
+    $cmd  = "$ALIGN -k $kmer_size -g $kmer_file -u 3 ";
+    $cmd .= "-s $divide_size -s2 2000 -n 1  -t $thread ";
+    $cmd .= "-p $project -q $queue -b $pro_name ";
+    $cmd .= "-d $dir_align  $contig $pb_data";
+    debug($cmd);
+    system($cmd);
+    # |
+    # ==========================================================================
+
+
+    # 数据聚类
+    # ==========================================================================
+    # |
+    debug("do assembly");
+
+    # 进行组装
+    $cmd  = "cd $dir_assem && ";
+    # filter low quality alignment
+    $cmd .= "$FILTER $dir_align/align.al filter.al 300 0.7 && ";
+    # sort by pacbio
+    $cmd .= "sort -k 2,2 -S 1g -o filter.al filter.al && ";
+    # convert the pacbio format
+    $cmd .= "$CONVT filter.al contig.pos && ";
+    # build graph
+    $cmd .= "$GRAPH contig.pos graph.info && ";
+    $cmd .= "$GR2PB graph.info contig.pos graph_pb && ";
+    # link sequence
+    $cmd .= "$LINK graph_pb.lk backbone.fasta $contig $pb_data ";
+    # |
+    # ==========================================================================
+
+
+    # 提交任务
+    # ==========================================================================
+    # |
+    my $cmd_file = "$dir_shell/ASSEMBLE.SH";
+    debug($cmd);
+    outShell2("assemble.$i.sh\t$cmd", $cmd_file);
+    qsub($cmd_file, $dir_shell, "5G", 1,
+                    $queue, $project, $pro_name, 50);
+    # |
+    # ==========================================================================
+
+
+    # 整理结果
+    # ==========================================================================
+    # |
+    `cp $dir_assem/backbone.fasta $dir_input/assemble.$i.fa`;
+    $contig = "$dir_input/assemble.$i.fa";
+    # |
+    # ==========================================================================
+}
+
+
+# 进行纠错
+# ==============================================================================
+# |
+$cmd  = "$CORRECT -c 1 -g $kmer_file -k $kmer_size -u 3 -s 400 -s2 2000 ";
+$cmd .= "-t $thread -m 1 -d $dir_cor -b $pro_name -q $queue -p $project ";
+$cmd .= "-x -1 -j 1 -n 1 ";
+$cmd .= "$contig $pb_data";
+debug($cmd);
+system($cmd);
+# |
+# ==============================================================================
+
+
+# 从配置参数中取得参数
+# ==============================================================================
+# |
+sub parseCfg{
+    my $cfg_file = shift;
+    my $cfg_hdl = myOpen($cfg_file);
+
+    while (<$cfg_hdl>) {
+        chomp;
+        next if(/^#/);
+        next if(!/^\[/);
+        my($key, @values) = split;
+
+        # contig
+        $contig = $values[0] if($key eq "[contig]");
+        # pb file
+        $pb_lst = $values[0] if($key eq "[pb_lst]");
+        $filt_len = $values[0] if($key eq "[filt_len]");
+        $genome_size = $values[0] if($key eq "[genome_size]");
+        # kmer
+        ($kmer_file,$kmer_size) = @values if($key eq "[unique_kmer]");
+        # qsub job
+        $queue = $values[0] if($key eq "[queue]");
+        $project = $values[0] if($key eq "[Project]");
+        $pro_name = $values[0] if($key eq "[pro_name]");
+        $job_num = $values[0] if($key eq "[max_job]");
+        # thread
+        $thread = $values[0] if($key eq "[thread]");
+        # recursive
+        $recursive = $values[0] if($key eq "[recursive]");
+    }
+    $genome_size *= 10**6;
+    $kmer_file = abs_path($kmer_file);
+    $thread ||= 8;
+    $job_num ||= 50;
+    $contig = abs_path($contig);
+
+    close $cfg_hdl;
+}
+# |
+# ==============================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <file.lst> <filt_len> <outfile>\n" if(@ARGV==0);
+
+my($list, $filt_len, $outfile) = @ARGV;
+
+my $list_hdl = myOpen($list);
+my $out1_hdl = myOpen(">$outfile.1.fa");
+my $out2_hdl = myOpen(">$outfile.2.fa");
+while (my $file=<$list_hdl>)
+{
+    chomp $file;
+    my $type = getType($file);
+    if($type eq "non")
+    {
+    	die "please check the format of $file\n";
+    }
+
+    my $file_hdl = myOpen($file);
+    outFQ($file_hdl, $out1_hdl, $out2_hdl) if($type eq "fastq");
+    outFA($file_hdl, $out1_hdl, $out2_hdl) if($type eq "fasta");
+    close $file_hdl;
+}
+close $list_hdl;
+close $out1_hdl;
+close $out2_hdl;
+
+sub getType{
+	my $file = shift;
+	my $in_hdl = myOpen($file);
+	my $line = <$in_hdl>;
+	close $in_hdl;
+
+	return "fasta" if($line =~ /^>/);
+	return "fastq" if($line =~ /^@/);
+	return "non";
+}
+
+sub outFQ{
+	my($file_hdl, $out1_hdl, $out2_hdl) = @_;
+	while (my $id=<$file_hdl>)
+	{
+        my $seq = <$file_hdl>;
+        chomp $id;
+        chomp $seq;
+        my $len = length($seq);
+        next if($len<$filt_len);
+        $id =~ s/^[@|>]//;
+        $id = (split(/\s+/,$id))[0];
+
+        # simulate solexa reads
+        for(my $i=0; $i<$len; $i+=500){
+            my $end = $i+$len;
+            last if($end>=$len);
+
+            my $read1 = substr($seq, $i, 150);
+            my $read2 = substr($seq, $i+$filt_len-150, 150);
+            $read2 = revCom($read2);
+
+            print $out1_hdl ">$id:$i:$filt_len 1\n$read1\n";
+            print $out2_hdl ">$id:$i:$filt_len 2\n$read2\n";
+        }
+
+        <$file_hdl>;
+        <$file_hdl>;
+    }
+}
+
+sub outFA{
+	my($file_hdl, $out1_hdl, $out2_hdl) = @_;
+	my($id,$seq);
+	while (getSeq($file_hdl,\$id,\$seq)!=-1)
+	{
+        my $len = length($seq);
+        next if($len<$filt_len);
+
+        # simulate solexa reads
+        for(my $i=0; $i<$len; $i+=500){
+            my $end = $i+$filt_len;
+            last if($end>=$len);
+
+            my $read1 = substr($seq, $i, 150);
+            my $read2 = substr($seq, $i+$filt_len-150, 150);
+            $read2 = revCom($read2);
+
+            print $out1_hdl ">$id:$i:$filt_len 1\n$read1\n";
+            print $out2_hdl ">$id:$i:$filt_len 2\n$read2\n";
+        }
+    }
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use List::Util qw(max min);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <filt.al>  <out.pos>\n" if(@ARGV==0);
+
+my($align, $outfile) = @ARGV;
+
+my($in_hdl, $ou_hdl);
+
+# Record the short pacbio reads
+# ==============================================================================
+# |
+debug("record short reads");
+
+my %len_hash;
+my %short_hash;
+my @align_arr = ();
+
+$in_hdl = myOpen($align);
+while (<$in_hdl>)
+{
+	chomp;
+	my ($contig, $pacbio, $con_len, $pb_len, $strand,
+				$overlap, $con_pos,  $pb_pos, $score) = split;
+
+	next if(exists $short_hash{$pacbio});
+
+	if($pb_len==$overlap)
+	{
+		$len_hash{$contig} = $con_len;
+		$short_hash{$pacbio}=2;
+		next;
+	}
+}
+close $in_hdl;
+# |
+# ==============================================================================
+
+
+
+# Record pacbio related contig and center position
+# ==============================================================================
+# |
+debug("parsing alignment");
+
+my $pre_pb = "";
+my @contig_arr = ();
+$in_hdl = myOpen($align);
+$ou_hdl = myOpen(">$outfile");
+while (<$in_hdl>) {
+	chomp;
+	my ($contig, $pacbio, $con_len, $pb_len, $strand,
+				$overlap, $con_pos,  $pb_pos, $score) = split;
+
+	next if(exists $short_hash{$pacbio});
+	recordCtg() if($pre_pb ne $pacbio);
+
+	my $cent_pos=$pb_pos+int($con_len/2-$con_pos);
+	push(@contig_arr, "$contig,$strand,$cent_pos");
+
+	# 输出的文件中包含这条contig
+	delete $len_hash{$contig};
+
+	$pre_pb = $pacbio;
+}
+recordCtg();
+outSuperCtg();
+close $in_hdl;
+close $ou_hdl;
+# |
+# ==============================================================================
+
+
+# output the contig position
+# ==============================================================================
+# |
+sub recordCtg{
+	return if($pre_pb eq "");
+	return if(@contig_arr==0);
+	@contig_arr = sort by_pos(@contig_arr);
+
+	print $ou_hdl ">$pre_pb\n@contig_arr\n";
+	@contig_arr = ();
+}
+
+sub by_pos{
+	my($ctg1,$strand1,$pos1) = split(/,/, $a);
+	my($ctg2,$strand2,$pos2) = split(/,/, $b);
+	return $pos1<=>$pos2;
+}
+
+sub outSuperCtg{
+	foreach my $contig(keys %len_hash){
+		print $ou_hdl ">$contig\n$contig,+,0\n";
+	}
+}
+# |
+# ==============================================================================
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <backbone.fasta> <subread.fasta> <thread:4> <min_occ:1>\n" if(@ARGV==0);
+
+# 读入参数
+# ==============================================================================
+# |
+my($infile, $subread, $thread, $min_occ) = @ARGV;
+$infile = abs_path($infile);
+$subread = abs_path($subread);
+
+$thread ||= 4;
+$min_occ ||= 1;
+
+# 如果已存在被纠错，则退出
+exit(1) if(-e "$infile.consensus");
+
+my $dir_name = basename($infile).".dir";
+mkdir "$dir_name";
+chdir($dir_name);
+# |
+# ==============================================================================
+
+
+
+
+# 进行纠错
+# ==============================================================================
+# |
+cutFiles("subread.fasta", $subread, $infile);
+
+my $input = $infile;
+my $outfile;
+for(my $i=0; $i<1; $i++)
+{
+	my $cmd = "source $Bin/source.sh\n";
+	$cmd .= "$Bin/blasr subread.fasta $input -out mapped.m5 ";
+	$cmd .= "-fastSDP -minMatch 14 -bestn 1 -m 5  -nproc $thread\n";
+	$cmd .= "sort -k 6,6 -k 8,8n mapped.m5 -o mapped.m5 -S 1G -T ./ \n";
+	$cmd .= "pbdagcon -c $min_occ -j $thread mapped.m5 > consensus.$i.fasta 2>log\n";
+
+	system($cmd);
+	$outfile = "consensus.$i.fasta";
+	$input  = $outfile;
+}
+
+# |
+# ==============================================================================
+
+
+
+# 整理结果
+# ==============================================================================
+# |
+my $cmd  = "cd ..\n";
+$cmd .= "mv $dir_name/$outfile $infile.consensus\n";
+$cmd .= "rm -r $dir_name\n";
+
+system($cmd);
+# |
+# ==============================================================================
+
+
+
+# 对数据进行剪切
+# ==============================================================================
+# |
+sub cutFiles{
+	my $MAX_LEN = 50000;
+    my $OVL = 1000;
+
+	my ($outfile, @files) = @_;
+	my $ou_hdl = myOpen(">$outfile");
+	foreach my $file(@files){
+		my($id, $seq);
+		my $in_hdl = myOpen($file);
+		while (getSeq($in_hdl, \$id, \$seq)!=-1)
+		{
+			my $len = length($seq);
+			for(my $i=0; $i<$len; $i+=$MAX_LEN-$OVL)
+			{
+				my $sub_seq = substr($seq, $i, $MAX_LEN);
+				print $ou_hdl ">$id|$i\n$sub_seq\n";
+			}
+		}
+	}
+	close $ou_hdl;
+}
+# |
+# ==============================================================================
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use File::Basename;
+use Getopt::Long;
+use Cwd qw(abs_path getcwd);
+use FindBin qw($Bin);
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+=head1 Name
+
+    pbsplit.pl  --split backbone and related reads
+
+=head1 Usage
+
+    perl pbsplit.pl [arguments]
+
+    Arguments:
+        -a <FILE>       the backbone file to be corrected
+        -b <FILE>       the pacbio file used to correct backbone
+        -l <FILE>       the relation list between backbone and pacbio reads
+                        >bacbone1
+                        pacb1
+                        pacb2
+
+        -d <STR>        the output dir
+
+        -s <int>        the base to do consensens [2000000]
+
+
+=head1 Example
+
+	perl consensus.blasr.pl -a bacbone.fa -b pacbio.fa -l relation.lst -d Consensus
+
+=cut
+
+# Parameters
+# ==============================================================================
+#|
+my($backbone, $pb, $relation, $outDir, $max_base);
+my $help;
+
+GetOptions(
+    "a:s"     => \$backbone,
+    "b:s"     => \$pb,
+    "l:s"     => \$relation,
+    "d:s"     => \$outDir,
+    "s:i"     => \$max_base,
+    "help|h"  => \$help,
+);
+
+checkParam();
+
+$max_base ||= 2000000;
+$outDir = abs_path($outDir);
+#|
+# ==============================================================================
+
+
+# Directory
+# ==============================================================================
+#|
+`rm -r $outDir` if(-e $outDir);
+mkdir("$outDir");
+
+# ==============================================================================
+
+
+my($in_hdl, $ou_hdl, $ou2_hdl);
+my %read_backbone;
+# Record the related seqs with backbone
+# ==============================================================================
+#|
+debug("record relationship");
+$/ = ">";
+$in_hdl = myOpen($relation);
+while (<$in_hdl>)
+{
+    chomp;
+    next if(length $_ == 0);
+
+    my @array = split(/\n/, $_);
+    my $backbone = $array[0];
+    foreach my $id(@array[1..$#array])
+    {
+        $read_backbone{$id} .= "$backbone\t";
+    }
+}
+close $in_hdl;
+$/ = "\n";
+#|
+# ==============================================================================
+
+
+my %backbone_hash;
+my %len_hash;
+# Record the backbone
+# ==============================================================================
+#|
+my $bac_num = 0;
+my($id, $seq);
+$in_hdl = myOpen($backbone);
+while (getSeq($in_hdl, \$id, \$seq)!=-1)
+{
+    $backbone_hash{$id} = $seq;
+
+    my $len = length($seq);
+    $len_hash{$id} = $len;
+    $bac_num++;
+}
+close $in_hdl;
+#|
+# ==============================================================================
+
+
+# Covert the format of pb reads
+# ==============================================================================
+#|
+$in_hdl = myOpen($pb);
+$ou_hdl = myOpen(">temp.tab");
+while (getSeq($in_hdl, \$id, \$seq)!=-1)
+{
+    next if(!exists $read_backbone{$id});
+
+    my $backbones = $read_backbone{$id};
+    my @backbones = split(/\s+/, $backbones);
+    for(my $i=0; $i<@backbones && $i<3; $i++)
+    {
+        my $backbone = $backbones[$i];
+        print $ou_hdl "$backbone\t$id\t$seq\n";
+    }
+}
+close $in_hdl;
+close $ou_hdl;
+`sort -k 1,1 -S 5g -o temp.tab temp.tab`;
+
+my $temp = abs_path("temp.tab");
+#|
+# ==============================================================================
+
+
+my @files;
+# Split fasta file into a directory and with 20 files per subdirectory
+# ==============================================================================
+#|
+debug("split files...");
+
+chdir($outDir);
+
+$bac_num = 0;
+
+my $index = 0;
+my $base  = 0;
+my $pre_bac = "";
+
+$in_hdl  = myOpen($temp);
+$ou_hdl  = myOpen(">temp.fa");  # backbone
+$ou2_hdl = myOpen(">temp2.fa"); # sub reads
+while (<$in_hdl>)
+{
+    chomp;
+    my($backbone, $id, $seq) = split;
+    output() if($pre_bac ne $backbone && $base>$max_base);
+
+    # output backbone
+    if($pre_bac ne $backbone)
+    {
+        $base += $len_hash{$backbone};
+        print $ou_hdl ">$backbone\n$backbone_hash{$backbone}\n";
+        delete $backbone_hash{$backbone};
+        $bac_num++;
+    }
+    # output subreads
+    print $ou2_hdl ">$id\n$seq\n";
+    $pre_bac = $backbone;
+}
+output();
+close $in_hdl;
+
+# 输出未覆盖的backbone #
+while (my($id, $seq)=each %backbone_hash)
+{
+    $base += $len_hash{$id};
+    print $ou_hdl ">$id\n$seq\n";
+    print $ou2_hdl ">$id\n$seq\n";
+    output() if($base>$max_base);
+    $bac_num++;
+}
+output();
+close $ou_hdl;
+close $ou2_hdl;
+
+`rm temp* $temp`;
+
+sub output
+{
+    my $number = 20;
+
+    return if($base==0);
+
+    my $file1 = "split_$index.fasta";
+    my $file2 = "split_$index.subreads.fasta";
+
+    my $index2 = int($index/$number);
+    my $dir = "dir_$index2";
+    mkdir($dir) if(!-e $dir);
+
+    # move file into directory
+    close $ou_hdl;
+    close $ou2_hdl;
+    `mv temp.fa $dir/$file1`;
+    `mv temp2.fa $dir/$file2`;
+
+    push(@files, "$outDir/$dir/split_$index");
+
+    # reset
+    $ou_hdl  = myOpen(">temp.fa");
+    $ou2_hdl = myOpen(">temp2.fa");
+
+    $index++;
+    $base = 0;
+}
+#|
+# ==============================================================================
+
+
+sub checkParam{
+    if ($help || !defined $backbone)
+    {
+        die `pod2text $0`;
+    }
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <backbone.fasta> <contig.fasta> <thread:4> \n" if(@ARGV==0);
+
+# 读入参数
+# ==============================================================================
+# |
+my($infile, $subread, $thread, $min_occ) = @ARGV;
+$infile = abs_path($infile);
+$subread = abs_path($subread);
+
+$thread ||= 4;
+$min_occ ||= 1;
+
+# 如果已存在被纠错，则退出
+exit(1) if(-e "$infile.consensus");
+
+my $dir_name = basename($infile).".dir";
+mkdir "$dir_name";
+chdir($dir_name);
+# |
+# ==============================================================================
+
+
+
+
+# 进行纠错
+# ==============================================================================
+# |
+my $cmd = "source $Bin/source.sh\n";
+$cmd .= "proovread -l $infile -u $subread --overwrite -t $thread"; #-m dazz-utg-noccs";
+system($cmd);
+# |
+# ==============================================================================
+
+
+
+# 整理结果
+# ==============================================================================
+# |
+my $outfile = "correct.fa";
+$cmd  = "perl $Bin/fq2fa.pl proovread/proovread.untrimmed.fq $outfile\n";
+$cmd .= "cd ..\n";
+$cmd .= "mv $dir_name/$outfile $infile.consensus\n";
+$cmd .= "rm -r $dir_name\n";
+
+system($cmd);
+# |
+# ==============================================================================
+use strict;
+use warnings;
+
+die "perl $0 <read.lst> " if(@ARGV==0);
+
+my($read_lst) = @ARGV;
+
+my $lst_hdl = myOpen($read_lst);
+while (my $file = <$lst_hdl>) {
+	chomp $file;
+	my $read_hdl = myOpen($file);
+	while (<$read_hdl>) {
+	    print $_;
+    }
+	close $read_hdl;
+}
+close $lst_hdl;
+
+
+
+#########################################################################
+sub myOpen{
+    my $file = shift;
+    my $handle;
+    if($file !~ /\.gz$/){
+        open $handle,"$file" or die "can't open $file";
+    }else{
+        open $handle,"gzip -dc $file|" or die "can't open $file";
+    }
+    return $handle;
+}
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use Qsub;
+use SeqIO;
+
+# Get parameters
+# ==============================================================================
+# |
+die "perl $0 <input.cfg>\n" if(@ARGV==0);
+my($cfg_file) = @ARGV;
+
+# contig
+my $contig;
+
+# min_occ
+my $min_occ = 1;
+
+# min dist
+my $min_dist = -1000;
+
+# pb file
+my($genome_size, $pb_lst, $filt_len);
+
+my $type_file = 1;
+
+# kmer
+my($kmer_file, $kmer_size);
+
+# sge
+my($queue, $project, $pro_name, $job_num);
+
+# align strategys
+my($k_size, $min_ovl, $mode, $score);
+
+# thread
+my $thread = 8;
+
+parseCfg($cfg_file);
+# |
+# ==============================================================================
+
+
+
+# Software Paths
+# ==============================================================================
+# |
+my $MERGE = "perl $Bin/mergeFiles.pl";
+my $ALIGN = "perl $Bin/Align.pl";
+
+my $FILTER  = "perl $Bin/filtAl.pl";
+my $CONVT = "perl $Bin/al2scf.pl";
+my $CONVT2 = "perl $Bin/al2genome.pl";
+my $BUILD  = "perl $Bin/buildGraph_s.pl";
+my $LINK = "perl $Bin/link_s.pl ";
+
+# |
+# ==============================================================================
+
+
+# 对数据进行过滤和重命名
+# ==============================================================================
+# |
+mkdir ("Data");
+my $dir_data = abs_path("Data");
+
+my $pb_data = abs_path("Data/data.fasta");
+
+my $contig2 = abs_path("Data/contig.fasta");
+my $contig_lst = abs_path("Data/contig.lst");
+outShell2($contig, $contig_lst);
+
+my $cmd = "$MERGE $contig_lst 100 $contig2\n";
+$cmd   .= "$MERGE $pb_lst $filt_len $pb_data \n";
+
+system($cmd);
+# |
+# ==============================================================================
+
+
+# 比对
+# ==============================================================================
+# |
+my $dir_align = abs_path("Align");
+
+my $divide_size = int($genome_size/10**6)+1;
+$divide_size=400 if($divide_size>400);
+
+$cmd  = "$ALIGN -k $k_size  -s $divide_size -t $thread ";
+$cmd .= "-g $kmer_file -u 3 -n 2 -x $min_ovl ";
+$cmd .= "-m $mode -d $dir_align $contig2 $pb_data\n";
+
+debug($cmd);
+system($cmd);
+# |
+# ==============================================================================
+
+
+# 进行scaffold构建
+# ==============================================================================
+# |
+my $dir_assem = abs_path("Scaffold");
+mkdir($dir_assem);
+chdir($dir_assem);
+
+# 命令
+$cmd  = "cd $dir_assem && ";
+# 去掉质量低的比对
+$cmd .= "$FILTER $dir_align/align.al filter.al 300 $score && ";
+$cmd .= "sort -k 1,1 filter.al -o filter.al && ";
+# 将比对信息转化为连接信息
+$cmd .= "$CONVT filter.al link.info && " if($type_file==1);
+$cmd .= "$CONVT2 filter.al link.info && " if($type_file!=1);
+
+# 构建连接
+$cmd .= "$BUILD link.info graph.info $min_occ $min_dist && ";
+# 输出连接
+$cmd .= "$LINK $contig2 graph.info scaffold.fasta ";
+
+# config 文件
+my $cfg = "SCAFF.SH";
+outShell2("scaffold.sh\t$cmd", $cfg);
+
+# 提交任务
+qsub($cfg, $dir_assem, "5G", 1,
+                $queue, $project, $pro_name, 50);
+
+# |
+# ==============================================================================
+
+
+# 清理数据
+# ==============================================================================
+# |
+`rm -r $dir_data`;
+# |
+# ==============================================================================
+
+
+# 从配置参数中取得参数
+# ==============================================================================
+# |
+sub parseCfg{
+    my $cfg_file = shift;
+    my $cfg_hdl = myOpen($cfg_file);
+
+    while (<$cfg_hdl>) {
+        chomp;
+        next if(/^#/);
+        next if(!/^\[/);
+        my($key, @values) = split;
+
+        # contig
+        $contig = $values[0] if($key eq "[contig]");
+
+        # min occ
+        $min_occ = $values[0] if($key eq "[min_occ]");
+
+        # min distant
+        $min_dist = $values[0] if($key eq "[min_dist]");
+
+        # pb file
+        ($pb_lst, $type_file) = @values if($key eq "[pb_lst]");
+        $filt_len = $values[0] if($key eq "[filt_len]");
+        $genome_size = $values[0] if($key eq "[genome_size]");
+
+        # kmer
+        ($kmer_file,$kmer_size) = @values if($key eq "[unique_kmer]");
+
+        # qsub job
+        $queue = $values[0] if($key eq "[queue]");
+        $project = $values[0] if($key eq "[Project]");
+        $pro_name = $values[0] if($key eq "[pro_name]");
+        $job_num = $values[0] if($key eq "[max_job]");
+
+        # thread
+        $thread = $values[0] if($key eq "[thread]");
+
+        # strategy
+    	($k_size, $min_ovl, $mode, $score) = @values if($key eq "[strategy]");
+    }
+    $contig = abs_path($contig);
+    $genome_size *= 10**6;
+    $kmer_file = abs_path($kmer_file);
+    $pb_lst = abs_path($pb_lst);
+    $type_file ||= 1;
+    close $cfg_hdl;
+}
+# |
+# ==============================================================================
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <genome.fa> <out> <len:10000> <cov:20>\n" if(@ARGV==0);
+
+my($genome, $out, $cut, $cov) = @ARGV;
+$cut ||= 10000;
+$cov ||= 20;
+
+my($id, $seq);
+my $in_hdl = myOpen($genome);
+my $ou_hdl = myOpen(">$out");
+while (getSeq($in_hdl, \$id, \$seq)!=-1)
+{
+    my $len = length($seq);
+    next if($len<$cut);
+
+    my $total = 0;
+    while ($total/$len<$cov) {
+        my $start = int(rand($len));
+        my $sub = substr($seq, $start, $cut);
+        next if(length($sub)<500);
+        $total += length($sub);
+        my $new_id = "${id}_$start";
+        print $ou_hdl ">$new_id\n$sub\n";
+    }
+}
+close $in_hdl;
+close $ou_hdl;
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+
+die "perl $0 <seq.fa> <out> <memory(G):1>\n" if(@ARGV==0);
+
+my($file, $out, $memory) = @ARGV;
+$memory ||= 1;
+
+# covert format
+my $in_hdl = myOpen($file);
+open FO,">temp.$$" or die $!;
+my($id, $seq);
+while(getSeq($in_hdl,\$id,\$seq)!=-1)
+{
+	my $len = length($seq);
+	print FO "$id\t$len\t$seq\n";		
+}
+close $in_hdl;
+close FO;
+
+# sort by length
+my $cmd = "sort -k 2,2nr -T ./ -S ${memory}G -o temp.$$ temp.$$";
+system($cmd);
+
+# convert formate
+$in_hdl = myOpen("temp.$$");
+open FO,">$out" or die $!;
+while(<$in_hdl>){
+    chomp;
+    my($id,$len,$seq) = split;
+    print FO ">$id\n$seq\n";
+}
+close $in_hdl;
+close FO;
+
+$cmd = "rm temp.$$";
+system($cmd);
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <ref.fasta> <outdir> <prefix> <base:20000000> <num:50>\n" if(@ARGV==0);
+
+my($infile, $outdir, $prefix, $max_base, $max_num) = @ARGV;
+$infile = abs_path($infile);
+$max_base ||= 20000000; # 20M
+$max_num ||= 50;
+
+mkdir($outdir) if(!-e $outdir);
+chdir $outdir;
+
+my $index = 0;
+my $base  = 0;
+
+my($id, $seq);
+my $outfile = "$prefix.tmp";
+my $in_hdl = myOpen($infile);
+my $ou_hdl = myOpen(">$outfile");
+while (getSeq($in_hdl,\$id,\$seq)!=-1)
+{
+    print $ou_hdl ">$id\n$seq\n";
+	my $len = length($seq);
+	$base += $len;
+    output() if($base >= $max_base);
+}
+output();
+close $in_hdl;
+close $ou_hdl;
+
+`rm $outfile`;
+
+sub output{
+    return if($base==0);
+    my $dir_idx = int($index/$max_num);
+    my $out_dir = "Split_$dir_idx";
+    mkdir($out_dir) if(!-e $out_dir);
+    close $ou_hdl;
+    `mv $outfile $out_dir/$prefix.$index.fasta`;
+    # reset
+    $index++;
+    $base = 0;
+    $ou_hdl = myOpen(">$outfile");
+}
+#!/usr/bin/perl
+use warnings;
+use strict;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN { 
+    push (@INC,"$Bin"); 
+} 
+use SeqIO;
+
+
+die "perl $0 <infile>\n" if(@ARGV==0);
+
+my($infile) = @ARGV;
+my %hdl_hash;
+
+my $in_hdl = myOpen($infile);
+while (my $id = <$in_hdl>) {
+
+	my $seq = <$in_hdl>;
+	chomp $id;
+	chomp $seq;
+
+	my @array = split(/\s+/,$id);
+	$id = "@array[0..$#array-1]";
+	my $info = $array[-1];
+	my($out_prefix,$len1,$len2) = split(/:/,$info);
+	
+	if(!defined $len2){
+		my $out_file;
+		$out_file = "$out_prefix.single.fasta.gz";
+		if(!exists $hdl_hash{$out_file}){
+			my $out_hdl = myOpen("|gzip>$out_file");
+			$hdl_hash{$out_file} = $out_hdl;
+		}
+		my $out_hdl = $hdl_hash{$out_file};
+		print $out_hdl "$id\n$seq\n";
+	}
+
+	if(defined $len2){
+		my($read1,$read2);
+
+		$read1 = "$out_prefix.1.fasta.gz";
+		$read2 = "$out_prefix.2.fasta.gz";
+
+		if(!exists $hdl_hash{$read1}){
+			my $out_hdl1 = myOpen("|gzip>$read1");
+			my $out_hdl2 = myOpen("|gzip>$read2");
+			$hdl_hash{$read1} = $out_hdl1;
+			$hdl_hash{$read2} = $out_hdl2;
+		}
+
+		my $out_hdl1 = $hdl_hash{$read1};
+		my $out_hdl2 = $hdl_hash{$read2};
+
+		my $seq1 = substr($seq,0,$len1);
+		my $seq2 = substr($seq,-$len2,$len2);
+		
+		print $out_hdl1 "$id/1\n$seq1\n";
+		print $out_hdl2 "$id/2\n$seq2\n";
+	}
+
+}
+close $in_hdl;
+
+foreach my $file(keys %hdl_hash)
+{
+	my $hdl = $hdl_hash{$file};
+	close $hdl;
+}use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+die "perl $0 <file.lst> <outfile> <min_len:5000>\n" if(@ARGV==0);
+
+my($list, $outfile, $min_len) = @ARGV;
+$min_len ||= 5000;
+
+# Only output one read per cell
+# ==============================================================================
+# |
+my @array = ();
+my $pre_cell = "-1";
+
+my $list_hdl = myOpen($list);
+my $out_hdl = myOpen(">$outfile");
+
+while (my $file=<$list_hdl>) 
+{
+    chomp $file;
+    my $file_hdl = myOpen($file);
+    while (my $id=<$file_hdl>) 
+    {
+        my $seq = <$file_hdl>;
+        if($id=~/^@/){
+            <$file_hdl>;
+            <$file_hdl>;
+        }
+
+        chomp $id;
+        chomp $seq;
+        my $len = length($seq);
+        next if($len<$min_len);
+
+        $id =~ s/^@/>/;
+        $id = (split(/\s+/, $id))[0];
+        print $out_hdl "$id\n$seq\n"; 
+    }
+    close $file_hdl;
+}
+close $list_hdl;
+close $out_hdl;
+# |
+# ==============================================================================
+
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(abs_path getcwd);
+
+BEGIN {
+    push (@INC,"$Bin");
+}
+use SeqIO;
+
+use Inline C => Config => INC => '-I$Bin/../Source/DNA2';
+use Inline C => Config => LIBS => '-LBin/../Source/DNA2 -lSeq';
+use Inline 'C';
+
+my $seq1 = "CCAACCAGTAGTTCCACCTCTGGTTCTTCTGAGAGCAAAACGAGTTCGGCTAGTTCTTCCTCTTCTTCCTCTTCTATCTCTTCTGAATCACCAAA";
+my $seq2 = "TTCTGAGAGCAAAACGAGTTCGGCTAGTTCTTCCTCTTCTTCCTCTTCTATCTCTTCTGAATCACCAAA";
+my $result = sayhello($seq1, $seq2);
+
+print "$result\n";
+
+__END__
+__C__
+
+#include "SeqTool.h"
+
+int sayhello(char* seq1, char* seq2){
+    return 1000;
+}
+
+int align(char* seq1, char* seq2){
+    SeqTool tool;
+    cerr<<seq1<<endl;
+    Conn_info info = tool.alignment(seq1, seq2, 1);
+    return 99;
+}
