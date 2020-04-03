@@ -5,11 +5,10 @@ This is a software for remove dupplication for genome.
 * This software Need > 100G memory 
 
 * This version on GitHub is only support reference <100M
-* We provide a **commercial version** on Galaxy:  http://t2h5556814.zicp.vip:9090
 
-* Please contact us: sci@kaitaibio.com
+* Please contact us: tanger.zhang@gmail.com
 
-
+  
 
 **Usage:**
 
