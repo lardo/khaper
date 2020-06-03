@@ -35,14 +35,33 @@ We firstly use >40x Illumina reads to build the kmer frequency table. Then use t
   ```
   ls *.gz > fq.lst
   perl Bin/Graph.pl pipe -i fq.lst -m 2 -k 15 -s 1,3 -d Kmer_15
+  
+  #result:
+  kmer bit file: Kmer_15/02.Uinque_bit/kmer_15.bit
   ```
+
+  **Note:** 
+
+  ​	a. k=15 is suitable for genome with size <100M.
+
+  ​	b. k=17 is suitable for genome with size <10G.
+
+  ​	c. This version is only support k<=17.
 
 4. Compress the assembly file
 
-	````
-	# compress the genome
-	echo "clean assemble.fasta" > file.lst
-	perl Bin/Compress.pl compress -i file.lst -g Kmer_15/02.Uinque_bit/kmer_15.bit -k 15 -m 3 -t 0.3 -n 1
   ````
+  # compress the genome
+  echo "clean assemble.fasta" > file.lst
+  perl Bin/Compress.pl compress -i file.lst -g Kmer_15/02.Uinque_bit/kmer_15.bit -k 15 -m 3 -t 0.3 -n 1
   
+  # result:
+  compress file: clean.single.fasta.gz
+  ````
+
+  **Note:**
+
+  ​	a. If the compress file is larger than estimated genome size, turn up the **"-t"** value
+
+  ​	b. If the compress file is small than estimated genome size, turn down the **"-t"** value
 
