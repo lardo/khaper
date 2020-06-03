@@ -39,10 +39,10 @@ We firstly use >40x Illumina reads to build the kmer frequency table. Then use t
 
 4. Compress the assembly file
 
-   ````
-   # compress the genome
-   echo "clean assemble.fasta" > file.lst
-perl Bin/Compress.pl compress -i file.lst -g Kmer_15/02.Uinque_bit/kmer_15.bit -k 15 -m 3 -t 0.3 -n 1
-   ````
-   
+	````
+	# compress the genome
+	echo "clean assemble.fasta" > file.lst
+	perl Bin/Compress.pl compress -i file.lst -g Kmer_15/02.Uinque_bit/kmer_15.bit -k 15 -m 3 -t 0.3 -n 1
+  ````
+  
 
