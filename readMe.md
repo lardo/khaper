@@ -4,7 +4,7 @@ This is a software for remove dupplication for genome.
 
 * This software Need > 100G memory 
 
-* This version on GitHub is only support reference <100M
+* This version on GitHub is only support reference <4000M
 
 * Please contact us: tanger.zhang@gmail.com
 
