@@ -52,16 +52,29 @@ We firstly use >40x Illumina reads to build the kmer frequency table. Then use t
 
   ````
   # compress the genome
-  echo "clean assemble.fasta" > file.lst
-  perl Bin/Compress.pl compress -i file.lst -g Kmer_15/02.Uinque_bit/kmer_15.bit -k 15 -m 3 -t 0.3 -n 1
+  
+  # Usage:
+   perl remDup.pl <genome.fa> <outdir> <cutoff:0.7>
+  
+       Options:
+              --ref   <str> The ref genome to build kbit
+            --kbit  <str> The unique kmer file
+              --kmer  <int> the kmer size [15]
+            --sort  <int> sort seq by length [1]
+  
+Description
+       This script is to remove dupplcation seq
+  
+  # Demo
+  perl Bin/remDup.pl  --kbit Kmer_15/02.Uinque_bit/kmer_15.bit --kmer 15 assemble.fasta Compress 0.3
   
   # result:
-  compress file: clean.single.fasta.gz
+  compress file: Compress/trinity.single.fasta.gz
   ````
-
+  
   **Note:**
-
-  ​	a. If the compress file is larger than estimated genome size, turn up the **"-t"** value
-
-  ​	b. If the compress file is small than estimated genome size, turn down the **"-t"** value
+  
+  ​	a. If the compress file is larger than estimated genome size, turn down the **"<cutoff>"** value
+  
+  ​	b. If the compress file is small than estimated genome size, turn up the **"<cutoff>"** value
 
