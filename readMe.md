@@ -74,7 +74,7 @@ Description
   
   **Note:**
   
-  ​	a. If the compress file is larger than estimated genome size, turn down the **"<cutoff>"** value
+  ​	a. If the compress file is larger than estimated genome size, turn down the  cutoff value
   
-  ​	b. If the compress file is small than estimated genome size, turn up the **"<cutoff>"** value
+  ​	b. If the compress file is small than estimated genome size, turn up the  cutoff  value
 
